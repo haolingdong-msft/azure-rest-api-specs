@@ -532,6 +532,66 @@ export interface SemanticOperationReference {
   [key: string]: unknown;
 }
 
+export type SemanticChangeType =
+  | "versioning"
+  | "operation"
+  | "type"
+  | "sdk-customization"
+  | "documentation"
+  | "generation-configuration";
+
+export interface SemanticChangeFact {
+  id: string;
+  sourceChangeId: string;
+  hunkIds: string[];
+  declarationIds: string[];
+  beforeDeclarationIds: string[];
+  afterDeclarationIds: string[];
+  changeType: SemanticChangeType;
+  declarationKind?: string;
+  qualifiedName?: string;
+  action: "add" | "modify" | "remove";
+  facets: string[];
+  evidenceRef: {
+    artifact: "source/source-index.json";
+    sourceChangeId: string;
+    hunkIds: string[];
+    declarationIds: string[];
+  };
+}
+
+export interface SemanticCarryOverOperation {
+  operationId: string;
+  rest: "equivalent" | "different" | "unknown";
+  downstream: "equivalent" | "different" | "unknown";
+  beforeFactId?: string;
+  afterFactId?: string;
+  reason?: string;
+}
+
+export interface SemanticCarryOverProof {
+  schemaVersion: 1;
+  status: "complete" | "partial" | "not-applicable";
+  operations: SemanticCarryOverOperation[];
+  equivalentOperationIds: string[];
+  differentOperationIds: string[];
+  unknownOperationIds: string[];
+}
+
+export interface DimensionContextDecision {
+  mode: "agent" | "deterministic" | "not-applicable" | "blocked";
+  reason: string;
+  evidenceIds?: string[];
+}
+
+export interface SemanticContextPolicy {
+  schemaVersion: 1;
+  rest: DimensionContextDecision;
+  downstream: DimensionContextDecision;
+  guidelines: DimensionContextDecision;
+  documentation: DimensionContextDecision;
+}
+
 export interface SemanticReviewUnit {
   id: string;
   projectId?: string;
@@ -548,6 +608,11 @@ export interface SemanticReviewUnit {
   action?: string;
   changeKind?: string;
   intentType?: string;
+  classificationVersion?: number;
+  changeFacts?: SemanticChangeFact[];
+  changeTypes?: SemanticChangeType[];
+  carryOverProof?: SemanticCarryOverProof;
+  contextPolicy?: SemanticContextPolicy;
   groupingEvidence?: {
     reasons?: string[];
     edges?: { summary?: string }[];
@@ -889,6 +954,7 @@ export interface ComplianceModelInputRequest extends ModelInputItem {
 }
 
 export interface AssessmentModelInput {
+  contextPolicyVersion?: number;
   context?: {
     sourceComparison?: unknown;
     projects?: {
@@ -899,6 +965,10 @@ export interface AssessmentModelInput {
   };
   semanticReviewUnits: ModelSemanticReviewUnit[];
   informationalSemanticIntentIds?: string[];
+  candidateOwnership?: {
+    rest: Record<string, string[]>;
+    downstream: Record<string, string[]>;
+  };
   restCandidates: (ModelInputItem & { id: string })[];
   downstreamCandidates: (ModelInputItem & { id: string })[];
   inferenceRequests: InferenceRequest[];
@@ -1688,6 +1758,8 @@ export interface AssessmentOutput {
   safety: {
     scope: "rest-and-downstream-only";
     status: "passed" | "failed" | "not-assessed";
+    verdict?: "passed" | "failed" | "unknown";
+    coverage?: "complete" | "partial" | "blocked";
     [key: string]: unknown;
   };
   dimensions: {
@@ -1699,14 +1771,20 @@ export interface AssessmentOutput {
     };
     rest: {
       status: string;
+      verdict?: "passed" | "failed" | "unknown";
+      coverage?: "complete" | "partial" | "blocked";
       findings: AssessmentFinding[];
       blockers?: unknown[];
+      rejectedCandidateCount?: number;
       legacyFindings?: LegacyAssessmentFinding[];
     };
     downstream: {
       status: string;
+      verdict?: "passed" | "failed" | "unknown";
+      coverage?: "complete" | "partial" | "blocked";
       findings: AssessmentFinding[];
       blockers?: unknown[];
+      rejectedCandidateCount?: number;
       methodGroups?: AssessmentMethodGroup[];
       operationGroups?: AssessmentMethodGroup[];
       typeImpacts?: AssessmentTypeImpact[];

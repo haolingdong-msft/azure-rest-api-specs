@@ -1,5 +1,17 @@
 # Azure TypeSpec Assessment Design
 
+**Status:** Accepted deterministic file/name-based grouping, matching the
+five-case coordinator HTML preview. Complete report regeneration and publication
+are required for the selected nine-core and three-verification cohorts.
+
+This document is the authoritative assessment design. Keep the existing
+context-efficiency architecture, classification-version-3 declaration facts,
+publication eligibility, and coarse grouping. Do not introduce finer
+business-feature splitting or Agent regrouping. The earlier proposed
+`intentCategory`, `derivation`, `intentGroupingRequests`, and
+`intentGroupingDecisions` contracts are deferred, not runtime requirements.
+Existing artifact schemas and deterministic intent identities remain in use.
+
 ## Goal
 
 Document the current architecture and invariants of
@@ -12,6 +24,10 @@ staged, unstaged, and relevant untracked changes.
 Included:
 
 - semantic understanding from changed TypeSpec and AutoRest;
+- structured, source-owned change facts that describe each edit before
+  business-intent grouping;
+- publication-only eligibility, feature-primary fact classification, and
+  deterministic file/name-based grouping with explicit heuristic provenance;
 - REST breaking candidates from AutoRest;
 - downstream SDK breaking candidates from TCGC;
 - documentation-grounded Azure Guidelines assessment from four official
@@ -20,16 +36,25 @@ Included:
   effective documentation;
 - optional bounded AI inference for source hunks that deterministic analysis
   cannot classify;
-- one bounded Agent judgment;
+- dimension-specific bounded Agent inputs and one bounded Agent judgment;
 - validated `assessment.json`;
 - readable `assessment.html`.
 
 All five dimensions are active. Documentation Completeness checks compiler
 documentation presence without judging prose. Overall safety
 continues to cover REST and downstream SDK compatibility only.
-Changed declaration scope uses actual added and removed lines, including an
-immediately attached documentation/decorator prefix. Declarations present only
-as unified-diff context are excluded.
+REST and downstream compatibility verdicts are independent from evidence
+coverage. Confirmed findings produce a failed verdict even when unresolved
+evidence leaves coverage partial. A dimension with blockers and no confirmed
+finding has an unknown verdict rather than a compatibility pass. Coverage is
+complete, partial, or blocked according to how much candidate evidence was
+assessed.
+Changed-text classification uses actual added and removed lines, including an
+immediately attached documentation/decorator prefix. The current declaration
+index can still contribute context-only facts: #46679 includes an unchanged
+`Operations` interface beside its edited `Versions` declaration. Preserve this
+known limitation and its mixed-group notice; this rollout does not claim to
+remove every context-only declaration from the fact inventory.
 
 ### Deferred: HTTP breaking-change tool integration
 
@@ -175,6 +200,378 @@ materialized artifacts during guarded finalization. Documentation checks still
 run when a hunk has no compatibility impact. Inference runs only for hunks
 whose deterministic coverage status is `unknown`; the Agent records the compact
 decision and the materializer writes `inference.json`.
+
+The accepted flow preserves deterministic grouping before impact association:
+
+```text
+Changed declarations/members: primary feature + supporting applicability
+                              |
+Declaration-scoped facts and strict publication eligibility
+          + existing file/name/source grouping
+                              |
+Independent raw REST/SDK analysis, compiler documentation,
+carry-over proof, and candidate-to-fact accounting
+                              |
+One existing bounded Agent phase:
+summarize the supplied groups and judge their independent assessment dimensions
+                              |
+Validate coverage and canonical ownership without changing group membership
+                              |
+Guarded finalization and report
+```
+
+All supplied groups stay frozen during Agent judgment. Optional inference
+continues to concern unknown source coverage and compatibility candidates,
+not regrouping. A source-file group may contain several independent features;
+determinism does not establish business coherence. Existing mixed-hunk/primary
+physical ownership remains valid. Candidate counts and finding links establish
+accounting, not a finer semantic partition.
+
+## Revised semantic-intent and context-selection architecture
+
+### Separate change facts, intent meaning, derivation, and input decisions
+
+The assessment answers four different questions with separate structures:
+
+1. **What changed?** Source-owned structured change facts.
+2. **What does the intent represent?** Publication, feature/contract, or an
+   explicit supporting change with coherent fact ownership.
+3. **How was that boundary derived?** The existing deterministic file/name,
+   source, publication, or operation/transform heuristic.
+4. **Which unresolved evidence needs Agent judgment?** Per-dimension input
+   decisions backed by deterministic evidence.
+
+One intent-level label must never answer all four questions. In particular,
+`api-version-publication`, `api-version-wide-change`, `normal`,
+`informational`, a common-type origin, an operation count, or a filename is
+not an assessment exemption. None authorizes blanket exclusion from REST,
+downstream SDK, Azure Guidelines, Documentation Completeness, inference,
+candidate judgment, or finding relationships. Existing types and derived
+presentation labels describe ownership, not impact outcomes. The goal is correct intent formation first,
+not merely giving every downstream finding some intent ID.
+
+### Existing intent types and grouping provenance
+
+Retain `intentType: api-version-publication | api-version-wide-change | normal`,
+`classificationVersion: 3`, change facts/types, and `groupingEvidence.reasons`.
+The HTML derives presentation labels from these existing fields; it does not
+add category or derivation fields to the artifact schemas.
+
+| Existing type or facts                                    | Presentation                                                                                                         |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `api-version-publication`                                 | API-version publication; every named fact must be a `Versions` declaration and every fact type must be `versioning`. |
+| `api-version-wide-change`                                 | Shared dependency/version-wide change, with its propagated effects retained.                                         |
+| Configuration, customization, or documentation facts only | Supporting change.                                                                                                   |
+| Other `normal` groups                                     | Feature / contract change, potentially covering multiple features at file granularity.                               |
+
+Use actual grouping reasons to distinguish source-file, file/name-based,
+SDK-compatibility, publication, and operation/transform relationship grouping.
+These are deterministic heuristics, not proof of a single business goal.
+A changed dependency annotation for existing versions must not invent a
+new-version publication or one authored feature per propagated operation.
+
+For a version-decorated feature, the feature is primary and the decorator is
+supporting applicability metadata. A feature intent may legitimately combine
+operation, type, and versioning facts. Mixed hunk ownership is not inherently
+wrong; the error is allowing a decorator to turn a feature into publication.
+Do not require token-span ownership or mandatory sub-hunk splitting.
+
+For example:
+
+```typespec
+@added(Versions.vNext)
+model VmAllocationInfo {
+  vmSize?: string;
+}
+```
+
+The semantic intent is **Add VM allocation information**; "available starting
+in vNext" is supporting context. This snippet alone does not establish a
+publication event. Only an actual new-version declaration can establish **Publish vNext**.
+If its initial hunk candidate also contains non-version declarations, it is
+not publication-eligible. Keep the resulting coarse non-publication group;
+do not force a new split merely to produce a separate publication card.
+
+Apply semantic precedence by identifying the changed subject first. An
+operation, model, property, or feature-availability edit is feature-primary;
+its own version decorators describe when it applies. Only a compiler-identified
+new-version declaration establishes publication. Neither an all-`versioning`
+fact label nor absence of directly owned operations proves publication.
+
+When a normal source group contains both a version declaration and other
+facts, display an explicit mixed-group notice rather than claiming pure
+publication or business coherence. This accepted limitation includes #46679.
+Do not add `publishedIn`, release-parent, or Agent-partition contracts now.
+Intent type and grouping remain independent of impact eligibility and outcomes.
+
+### Structured source-owned change facts
+
+Facts are derived before broad grouping from compiler declaration identity,
+changed-line intersections, attached documentation/decorator prefixes, and
+normalized before/after source and contract evidence. Facet classification is
+declaration-scoped, but the index can retain context-only declarations as
+facts. In particular, #46679's unchanged `Operations` context prevents its
+version hunk from qualifying as pure publication. Do not silently drop that
+fact or claim this extraction limitation is fixed.
+
+Each fact records at least:
+
+| Field                                          | Meaning                                                                                                                                                                  |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `id`                                           | Stable identity derived from canonical project, source, declaration, action, and evidence membership.                                                                    |
+| `projectId` and comparison scope               | Project plus selected baseline/target source commits and API-version projections.                                                                                        |
+| `sourceChangeIds`, `hunkIds`, `declarationIds` | Existing source/hunk provenance and compiler identities. Physical hunk ownership does not determine every fact's semantic category.                                      |
+| `changeType`                                   | `versioning`, `operation`, `type`, `sdk-customization`, `documentation`, or `generation-configuration`.                                                                  |
+| `declarationKind`                              | Compiler kind such as operation, model, model property, enum, union, interface, alias, or configuration entry.                                                           |
+| `action`                                       | `add`, `modify`, or `remove`, independent of change type.                                                                                                                |
+| `facets`                                       | Precise aspects such as requiredness, property presence, route, parameter, response, paging, LRO, common-type version, public name, or effective documentation presence. |
+| `before` and `after`                           | Typed values or canonical evidence references. A source excerpt alone is insufficient when normalized evidence exists.                                                   |
+| Version applicability                          | Exact availability, rename, or requiredness transition on this fact's own declaration, separate from primary change type.                                                |
+| Relationships                                  | Directly owned operations, propagated affected operations, referenced types, raw candidates, and proof records.                                                          |
+
+For example, `RoleAssignment.roleName` changing from optional to required is a
+`type` fact for a model-property declaration, action `modify`, with a
+`requiredness` facet and explicit optional-to-required evidence. It is not
+reclassified as an operation edit merely because many operations reference
+the containing model.
+
+Likewise, `@added(V)` on a new operation/model/property remains an
+operation/type addition available from V. `@removed`, `@renamedFrom`, and
+`@madeRequired` modify that subject's availability or contract; they do not
+automatically classify it as publication. Reserve versioning facts for actual
+version/dependency declarations or scoped supporting decorator changes, and
+distinguish their purposes. A supporting versioning fact may belong to a
+feature; an all-`versioning` label is not proof of publication.
+
+Derive action, facets, and applicability from the exact edited construct and
+its attached prefix, not changed text shared across its source, hunk, or
+merged unit. A decorator on another declaration cannot relabel this fact.
+Unchanged enclosing models/interfaces must not acquire another declaration's
+edited facets. Existing context-only fact rows remain visible under the known
+index limitation; their presence does not establish an authored feature.
+Derived projection effects link to governing source facts; do not pretend
+every activated declaration was newly authored by the PR.
+
+Every meaningful changed construct is represented by a fact or an explicit
+unresolved diagnostic. Independent edits remain independent facts even when
+they occur in one hunk. Retain existing primary hunk ownership and account for
+each physical hunk once. Independently, each fact has one primary semantic
+owner. Related intents may reference the same hunk as evidence without
+duplicating physical coverage. No new source-edit ledger or disjoint token-span
+partition is required. A hunk's primary source owner is bookkeeping, not
+authority to relabel all contained facts.
+
+### Coarse intents aggregate multiple fact types
+
+A deterministic file/name/source group may contain operation, type, versioning,
+customization, documentation, and configuration facts. Keep feature declarations
+primary and version applicability secondary, but do not require one fine-grained
+business feature per group. No group labeled publication may own feature facts.
+
+Preserve the current `mergeUnits` heuristics and stable identities, including
+source-file fallback for generic files such as `main.tsp` and `models.tsp`.
+Keep direct operation evidence and version/shared-type propagation distinguishable.
+Grouping reasons must be visible in the report so a broad group is not presented
+as an Agent-proven business boundary. The Agent summarizes and assesses the
+frozen coordinator groups; it cannot split, merge, or reassign their facts.
+
+### Dimension-specific Agent-input decisions
+
+Each fact or evidence scope records an independent decision for REST,
+downstream SDK, Azure Guidelines, and Documentation Completeness:
+
+```json
+{
+  "dimensionInputDecisions": {
+    "rest": {
+      "include": true,
+      "rule": "unresolved-rest-candidate",
+      "evidenceIds": ["rest-<hash>"]
+    },
+    "downstream": {
+      "include": false,
+      "rule": "verified-neutral-sdk-equivalence",
+      "evidenceIds": ["carry-over-proof-<hash>"]
+    },
+    "compliance": {
+      "include": true,
+      "rule": "version-event-requires-guidelines-judgment",
+      "evidenceIds": ["change-fact-<hash>"]
+    },
+    "documentQuality": {
+      "include": false,
+      "rule": "deterministic-compiler-document-check",
+      "evidenceIds": ["document-fact-<hash>"]
+    }
+  }
+}
+```
+
+These are input decisions, not a new workflow-state taxonomy. A deterministic
+result remains assessed when it needs no Agent tokens. Zero Agent input for an
+intent is valid only when every applicable dimension has a complete result,
+supported omission, or explicit limit. Evidence in one dimension never
+authorizes exclusion in another: REST or neutral-SDK equivalence does not
+resolve Guidelines eligibility or compiler documentation completeness.
+
+The initial implementation retains ordinary judgment for every raw breaking
+candidate except a positively proven selector-only artifact delta. An empty
+candidate list, a deterministic status in another dimension, or an intent
+description is not by itself a no-impact proof.
+
+### Proof-backed aggregated operation carry-over
+
+Large API-version releases store unchanged operations as one aggregated,
+derived carry-over set rather than one Agent review per operation. Every
+operation counted in the set must have:
+
+- a unique project-qualified baseline counterpart;
+- complete normalized REST equivalence for method, route, parameters,
+  requests, responses, headers, media types, paging/LRO wire behavior, and
+  recursively referenced schemas;
+- complete represented neutral-SDK equivalence for client/method identity,
+  public parameters, response types, paging/LRO behavior, and reachable named
+  types; and
+- selected source/API-version provenance and comparator version.
+
+The result for each side is `equivalent`, `different`, or `unknown`. Missing
+artifacts, ambiguous identities, unresolved references, unsupported contract
+fields, or conflicting normalization facts produce `unknown`, never
+carry-over. Method-signature equality cannot hide a reachable model change,
+and structural equality cannot erase nominal public type identity.
+
+Comparison may normalize only the exact compiler/emitter-identified selected
+API-version selector and non-contract artifact provenance. It must not ignore
+arbitrary date strings, fields named `version`, changed selector
+requiredness/location/type, namespace/type identity, or business properties
+that resemble API versions.
+
+Complete carry-over inventories and proof remain in deterministic artifacts
+and `assessment.json`. Bounded Agent input normally receives only the compact
+version event, count, proof reference, and unresolved exceptions. The report
+may expand the full list. Carry-over is evidence, not an authored change, and
+never suppresses a real candidate or a standalone changed public type.
+
+### Shared and common types: deduplicate evidence, not identities
+
+For a shared/common-type change, compare the effective before/after type once
+per distinct project, selected projection, and public identity context. Cache
+cycle-safe graph traversal by that full context and retain every incoming
+operation/type relationship.
+
+If the effective type changes, preserve its precise facets, raw candidates,
+candidate identities, and affected operations. If it is equivalent, omit only
+the dimension scopes supported by that evidence. A dependency/common-type
+version event may still require Guidelines judgment. Common origin, unchanged
+top-level method signatures, or a PR description claiming a breaking-change
+fix does not prove no impact.
+
+Shared normalized type graphs and before/after evidence may be serialized once
+and referenced by many candidates. Every raw candidate still receives its own
+recorded decision unless exact selector-only proof excludes it. Where
+operation-specific usage or exposure changes the judgment, keep separate
+candidate scopes while referencing the shared graph once.
+
+### Candidate, finding, and source ownership
+
+Raw REST/downstream analysis is independent of semantic filtering. Before
+building Agent input, every raw candidate is mapped by dimension and candidate
+ID to source change facts and frozen intent or immutable unresolved seed
+scope using project-qualified declaration identity, hunk intersection, and
+verified operation/compiler relationships. After validated grouping,
+materialization joins final intent ownership through the unchanged facts.
+A filename, physical hunk owner's category, or display-name match is
+insufficient.
+
+If ownership cannot be proven, retain the candidate and emit an ownership
+diagnostic. Do not assign it to an arbitrary intent and do not drop it to fit
+the context budget. Inferred candidates inherit the fact/intent that requested
+inference. Documentation findings inherit compiler declaration/source
+ownership. Guidelines findings inherit the exact included fact/intent scope.
+
+Approved findings inherit authoritative ownership from their candidate,
+inference request, compiler declaration, or Guidelines scope; assembly does
+not reconstruct ownership from display text. Every retained finding must have
+at least one existing evidence-backed intent owner, and finding/intent
+relationships are reciprocal.
+
+### Mandatory conservation and validation invariants
+
+Before Agent judgment:
+
+1. every changed hunk retains complete existing source coverage and each fact
+   belongs to one frozen intent or unresolved seed, without mandatory sub-hunk
+   ownership;
+2. every changed construct is a fact or an explicit unresolved diagnostic;
+3. every carry-over count and omitted dimension has complete scope-matched
+   proof;
+4. no real delta disappears into an unchanged-operation summary;
+5. every raw candidate reaches judgment or has exact selector-only exclusion
+   evidence;
+6. model-input candidate IDs and inference/Guidelines requests match the
+   candidate and source accounting;
+7. shared evidence is deduplicated without losing candidate identities or
+   affected-operation relationships;
+8. identical deterministic inputs reproduce facts, frozen IDs, grouping
+   requests, mappings, proof, and input decisions;
+9. publication owns only compiler-identified new-version declaration/metadata
+   facts; and
+10. frozen groups have structural proof; unresolved boundaries have bounded
+    requests rather than falsely final business-intent claims.
+
+At guarded finalization:
+
+1. every retained finding has evidence-backed intent ownership;
+2. ownership agrees with the candidate, inference request, compiler
+   declaration, or Guidelines scope;
+3. relationships are reciprocal;
+4. carry-over proof cannot justify suppression of a real candidate;
+5. versioning intents remain eligible to own supported Guidelines findings;
+6. publication summaries count only verified-equivalent operation pairs;
+7. supplied group membership and canonical fact/hunk identities remain frozen;
+   grouping provenance is explicit and the Agent cannot repartition them;
+8. no feature fact/candidate is owned by publication; release links and
+   propagated effects never transfer ownership;
+9. final context policy agrees with the exact final proof/membership scope;
+   `different`, `unknown`, stale, or vacuously empty proofs cannot justify
+   unchanged treatment of a nonempty scope; and
+10. identical validated grouping decisions reproduce final IDs, without
+    claiming independent Agent judgments always choose identical groups.
+
+For new runs, violations are blocking tool-integrity errors. Preserve
+diagnostics and candidates rather than returning a pass-shaped result. A
+missing SDK artifact may leave REST work usable, but it prevents a downstream
+no-impact conclusion and remains an explicit dimension limit.
+
+### Published baseline audit and acceptance gap
+
+The 2026-10-27 read-only audit inspected 34 published reports. The latest
+regenerated reports still contain these publication-purity failures:
+
+| Published intent                                                                                                            | Feature changes incorrectly owned by publication                                                                                                                                  |
+| --------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [#46679](https://haolingdong-msft.github.io/typespec-assessment-reports/reports/pr-46679/#intent-semantic-bfff70fae9239fc0) | Storage compliance lock, SaaS activation, cloud-account inputs, and role-assignment changes.                                                                                      |
+| [#44101](https://haolingdong-msft.github.io/typespec-assessment-reports/reports/pr-44101/#intent-semantic-02aa03f15181b182) | Added `VmAllocationInfo`, including `vmSize` and `zone`.                                                                                                                          |
+| [#43918](https://haolingdong-msft.github.io/typespec-assessment-reports/reports/pr-43918/#intent-semantic-65208fd7e173031e) | Cluster-mesh `@removed` availability changes. Intentional exclusion from stable is a feature/lifecycle change, not automatically a breaking finding.                              |
+| [#44988](https://haolingdong-msft.github.io/typespec-assessment-reports/reports/pr-44988/#intent-semantic-31fb7c3694fb1cd7) | Added `ApplicationRule.sourceKubeSelectorGroups` and `NetworkRule.sourceKubeSelectorGroups`, separate from the resource intent that currently owns the selector-group operations. |
+
+#44988 also has a partial proof containing 149 different operation pairs and
+zero equivalent pairs, yet publication is informational and Guidelines not
+applicable. This is a confirmed artifact inconsistency; the exact producing
+stage is not established by this audit. The revised finalizer must reject the
+contradiction, not merely change the title or drop associated findings.
+
+Older reports #43855, #44200, #44332, #44334, #44384, and #45167 also mix feature
+edits into publication. They are historical examples, not additional fresh
+verification runs. Large operation inventories alone are not contamination:
+the inspected #39064 and #43757 publication facts contain only `Versions`.
+
+The extractor's version-decorator shortcut and larger unit/source text can
+misclassify individual features as versioning; grouping then treats those
+labels as publication proof. Fixing nonempty finding associations is
+insufficient. This revision requires feature-primary facts, coherent ownership,
+publication eligibility, and actual heuristic provenance before impact associations can
+be accepted.
 
 ## 1. Preparation manifest
 
@@ -383,12 +780,19 @@ target   = head source @ 2026-05-01-preview
 Version-aware REST classification:
 
 - In `new-api-version` mode, baseline-to-target wire differences describe
-  version-scoped REST evolution and appear in Semantic operation cards.
-- They do not create REST breaking findings solely because the newly added
-  version differs from the previous version.
+  cross-version migration compatibility. Retain substantive REST candidates
+  for Agent judgment; adding a version is not a compatibility exemption.
+- Exclude only a proven selector-only change: the same query `api-version`
+  parameter, unchanged requiredness and collection format, and otherwise
+  identical schemas whose sole enum values (and defaults, when present)
+  exactly match their respective emitted API versions.
+- Judge request/response direction, requiredness, removals, types, and constraints
+  from emitted contract evidence. Label confirmed findings as cross-version
+  migration incompatibilities, not existing-version regressions.
 - The baseline projection must be successfully produced from current source;
-  this proves the previous stable/preview version remains representable by the
-  final TypeSpec.
+  this establishes representability only. It does not prove preservation of
+  that version's previously published contract; that requires a same-version
+  base-source versus head-source comparison.
 - TCGC differences may still be downstream SDK breaking when the generated
   public method/type identity is reused across the version transition.
 - In `existing-api-version` and `unversioned` modes, incompatible
@@ -401,9 +805,10 @@ PR 44988 publishes Microsoft.Network API version `2025-09-01`. It uses
 with the previous latest stable Network version as baseline and `2025-09-01`
 as target.
 
-The expected coherent Semantic intents are:
+The historical design expected these coherent Semantic intents:
 
-1. Publish the `2025-09-01` Network API version — 101 operations.
+1. Publish the `2025-09-01` Network API version — historically 101 affected
+   operations.
 2. Add address prefix set child resources — 4 operations.
 3. Add ExpressRoute LAG resources — 11 operations.
 4. Allow AFC-managed firewall policy writes — 1 operation.
@@ -415,8 +820,19 @@ The expected coherent Semantic intents are:
 10. Add effective-route retrieval for virtual network gateways — 1 operation.
 11. Add virtual-network IP configuration move behavior — 1 operation.
 
-The API-version publication intent uses bounded rendering: show 3
-representative operations and retain all 101 in JSON.
+The revised implementation must re-derive the publication carry-over count
+from verified operation pairs. It must not treat 101, or any count from an old
+report or screenshot, as an acceptance threshold. The compact version event
+and proof-backed count may enter Agent input; the complete verified inventory
+stays in deterministic JSON and may be expanded in the report. Actual feature
+additions and contract changes remain separate facts/intents and ordinary
+assessment scopes.
+
+Publication owns only the new version declaration/metadata. In particular,
+`ApplicationRule.sourceKubeSelectorGroups` and
+`NetworkRule.sourceKubeSelectorGroups` belong with their coherent Kubernetes
+selector feature, not publication, even though each has `@added(Versions.v2025_09_01)`.
+A shared physical hunk or source file does not prevent that separation.
 
 The service gateway intent has action `modify` and exactly two affected REST
 operations:
@@ -614,21 +1030,53 @@ The original plan used AutoRest-change-first review units:
 }
 ```
 
-The approved follow-up refactor changes this to TypeSpec-source-first:
+The current contract uses TypeSpec-source-first facts and existing deterministic
+grouping fields. Keep existing input, decision, and final-output schemas; only
+the fact-classification version advances to 3. Do not silently interpret legacy
+facts as having the new classification. The example below illustrates the
+existing semantic-input fields; its artifact schema remains version 1:
 
 ```json
 {
   "schemaVersion": 1,
   "status": "ready|blocked",
+  "classificationVersion": "<version>",
   "facts": {
     "operation-<hash>": {}
+  },
+  "changeFacts": {
+    "change-fact-<hash>": {
+      "id": "change-fact-<hash>",
+      "projectId": "project-<hash>",
+      "changeType": "versioning|operation|type|sdk-customization|documentation|generation-configuration",
+      "declarationKind": "operation|model|property|interface|enum|union|alias|configuration",
+      "action": "add|modify|remove",
+      "facets": ["requiredness"],
+      "versionApplicability": [],
+      "sourceChangeIds": ["source-<hash>"],
+      "hunkIds": ["hunk-<hash>"],
+      "declarationIds": ["declaration-<hash>"],
+      "before": {
+        "optional": true
+      },
+      "after": {
+        "optional": false
+      },
+      "directOperationIds": ["ScenarioRuns_Cancel"],
+      "propagatedOperationIds": [],
+      "candidateIds": ["downstream-<hash>"]
+    }
   },
   "reviewUnits": [
     {
       "id": "semantic-<hash>",
       "projectId": "project-<hash>",
+      "intentType": "normal",
+      "classificationVersion": 3,
+      "groupingEvidence": { "reasons": ["source:source-<hash>"] },
       "action": "add|remove|modify",
-      "changeKind": "add|remove|modify",
+      "changeFactIds": ["change-fact-<hash>"],
+      "changeTypes": ["operation", "type"],
       "sourceChangeIds": ["source-<hash>"],
       "hunkIds": ["hunk-<hash>"],
       "declarationIds": ["declaration-<hash>"],
@@ -664,74 +1112,108 @@ The approved follow-up refactor changes this to TypeSpec-source-first:
       "operationIds": ["operation-<hash>"],
       "beforeFactIds": ["operation-<hash>"],
       "afterFactIds": ["operation-<hash>"],
-      "changedAspects": []
+      "publishedIn": [],
+      "changedAspects": [],
+      "carryOverProofIds": [],
+      "dimensionInputDecisions": {
+        "rest": {
+          "include": true,
+          "rule": "unresolved-rest-candidate",
+          "evidenceIds": ["rest-<hash>"]
+        },
+        "downstream": {
+          "include": true,
+          "rule": "unresolved-downstream-candidate",
+          "evidenceIds": ["downstream-<hash>"]
+        },
+        "compliance": {
+          "include": true,
+          "rule": "changed-design-requires-guidelines-judgment",
+          "evidenceIds": ["change-fact-<hash>"]
+        },
+        "documentQuality": {
+          "include": false,
+          "rule": "deterministic-compiler-document-check",
+          "evidenceIds": ["document-fact-<hash>"]
+        }
+      }
     }
   ],
+  "candidateOwnership": {
+    "downstream:downstream-<hash>": {
+      "changeFactIds": ["change-fact-<hash>"],
+      "semanticIntentIds": ["semantic-<hash>"],
+      "matchBasis": "project-qualified-declaration-identity",
+      "evidenceIds": ["declaration-<hash>"]
+    }
+  },
   "blockers": []
 }
 ```
 
-Every meaningful changed TypeSpec hunk must be covered once even when there is
-no directly affected REST operation or the REST contract is unchanged.
+Every meaningful changed construct must be represented by its fact and primary
+semantic membership, even with no affected operation or breaking candidate.
+Keep existing physical hunk coverage/primary ownership; evidence references to
+that hunk need not determine every fact's business grouping.
+Publication owns only version declaration/metadata; feature and supporting
+intents may aggregate several fact types. No grouping authorizes a
+dimension-wide omission. Candidate ownership names the coordinator's immutable
+facts and intent IDs before judgment and remains unchanged during materialization.
 
 ### Semantic intent grouping
 
-Semantic intents are grouped by **coherent TypeSpec change**, not mechanically
-by file, declaration, REST operation, or Git hunk. A coherent change is one
-user-reviewable API behavior goal implemented by one or more related TypeSpec
-hunks.
+Start with one candidate per source hunk and its indexed declarations. Derive
+classification-version-3 declaration facts before grouping. Preserve
+`mergeUnits` rather than implementing a new semantic partition algorithm.
 
-Cross-file grouping is allowed. For example, an LRO helper change, a polling
-response model, and the operations that consume them may form one intent when
-they jointly implement the same Location-based polling behavior.
+For `new-api-version` comparisons, assign each candidate to the first matching
+bucket:
 
-Two hunks may be grouped only when deterministic TypeSpec evidence establishes
-at least one of these relationships:
+1. `publication` only when every fact is a version-declaration fact, no
+   operation is directly owned, and no existing operation has a directly
+   matched contract change;
+2. `sdk-compatibility` for client/back-compatible files and recognized SDK
+   customization text;
+3. `feature:<basename>` for non-generic files, or a recognized feature filename
+   referenced by a generic-file hunk;
+4. otherwise `source:<sourceChangeId>`, including generic `main.tsp` and
+   `models.tsp` changes.
 
-1. a changed operation directly references the changed model, alias, template,
-   trait, or helper;
-2. a changed template, trait, or helper is instantiated by the changed
-   operation;
-3. changed declarations are members of the same model or interface and express
-   one indivisible behavior change;
-4. a versioning or decorator change directly governs the changed declaration;
-5. multiple changes have the same affected REST operation set and one cannot
-   accurately describe the API behavior without the others.
-6. independent declarations undergo the same normalized semantic transform,
-   such as `string` to `Azure.Core.armResourceIdentifier` or a batch of
-   language-specific `@clientName` additions.
-7. an import-only, `using`-only, suppression-only, or documentation-only hunk
-   directly supports another changed declaration in the same behavior change,
-   and symbol/import resolution proves that dependency.
+Union all members of a bucket. A broad source bucket is accepted even when it
+contains several features. Do not require a fixed number of intents or force
+publication out of a mixed initial candidate. A group that fails publication
+eligibility stays normal and receives the mixed-version/source notice.
 
-Do not group hunks merely because they are in the same file, project, resource
-family, or pull request. Keep independent changes separate, including SDK
-naming customizations, scalar/type corrections, documentation-only changes,
-and unrelated operations that happen to use the same shared helper.
+For other comparisons, retain the current operation-overlap, shared
+transform/LRO-tag, and same-source behavioral-support connected grouping.
+These are heuristics, not proof of business coherence. Tags attached to a
+new-version source bucket explain its contents; they are not its merge key.
 
-Identical transforms form their own coherent group; they do not merge with
-other behavior groups. For example, all ARM identifier corrections may form
-one intent, and all C# naming additions may form another, but neither merges
-into the Location-based LRO intent.
+Retain existing cross-project deduplication and one primary physical owner per
+hunk. No token-span partition, finer feature graph, new grouping schema, or
+Agent split/merge phase is introduced. Intent IDs and membership are fixed
+before the bounded Agent phase.
 
-Grouping is deterministic and happens before Agent judgment. The Agent writes
-the title and summary for each supplied group but cannot merge, split, or move
-hunks between groups.
+The Agent summarizes each supplied group and judges every requested
+compatibility/Guidelines scope. It must not replace the coordinator's groups.
+Documentation remains compiler-derived. Raw candidate identities, source
+ownership, and dimension eligibility are conserved independently of grouping.
 
 ### Bounded Semantic judgment
 
-Semantic judgment is **intent-level only**. The Agent receives one compact
-synopsis per deterministic review unit:
+Semantic judgment is **intent-level only**. The Agent receives compact frozen
+intent synopses:
 
 - action and grouped declaration names/kinds;
 - changed TypeSpec constructs and up to three representative source excerpts;
 - affected REST operation count and up to three representative operation
   identities;
 - aggregate REST and downstream change signals; and
-- deterministic grouping and mapping summaries.
+- fact types, source/name/relationship grouping reasons, and mapping evidence.
 
-The Agent produces one concise title and one behavior summary for the review
-unit. It does not explain, classify, or restate every affected operation.
+The Agent produces one concise title and summary per frozen intent.
+It cannot regroup intents or claim that a file bucket proves one business goal. It does not
+explain, classify, or restate every affected operation.
 Complete operation facts, before/after contracts, and source inventories remain
 deterministic evidence outside the Semantic prompt. They are available to REST
 and downstream candidate judgment when needed, but are not duplicated into
@@ -742,19 +1224,18 @@ not enumerate all operations, declarations, or hunks. Operation count and
 representative examples provide scale and traceability without expanding the
 Agent workload with the size of the affected operation set.
 
-Each non-standalone group records structured `groupingEvidence`. Every evidence
-entry identifies the allowed relationship kind and the exact hunk,
-declaration, and compiled fact IDs supporting that relationship. A group
-containing one standalone hunk uses an empty `groupingEvidence` array.
+Each group retains exact change-fact membership, classification version, and
+existing `groupingEvidence`. The HTML exposes the actual grouping basis,
+fact/hunk/operation counts, and raw fact subjects/types/actions/facets.
 
-Each meaningful hunk belongs to exactly one semantic intent. Declarations may
-appear in more than one hunk, but each declaration-hunk occurrence belongs to
-only one intent. A hunk with no indexed declaration is still retained and
-grouped using its imports, decorators, references, and surrounding source
-evidence. If no deterministic relationship to another hunk exists, it becomes
-a standalone intent.
+Each fact has one primary semantic owner. Keep mixed hunks intact and preserve
+existing physical source accounting. A feature may include its operations,
+models, and version decorators. A coarse normal group may also contain a
+version declaration; display that limitation instead of relabeling it
+publication or forcing a finer split. Declaration-free
+import/decorator/configuration changes remain explicit facts or diagnostics.
 
-A coherent group has one `action`:
+Each coarse group has one derived `action`:
 
 1. use `add` when every selected affected REST operation is newly introduced;
 2. use `remove` when every selected affected REST operation is removed;
@@ -773,7 +1254,7 @@ Therefore, PR 43308's Location-based LRO group is `modify` even though it adds
 Conversely, supporting changes to an existing registration, import, version,
 or compatibility file do not turn a newly introduced API surface into
 `modify`. For example, an intent whose selected operations are all absent from
-the baseline and present in the target is `add`, even when its coherent source
+the baseline and present in the target is `add`, even when its coarse source
 group also contains a modified `main.tsp`.
 
 For PR 43308, the intended high-level grouping is:
@@ -783,8 +1264,9 @@ For PR 43308, the intended high-level grouping is:
 2. ARM resource identifier type corrections;
 3. C# SDK naming customizations.
 
-Other independently changed operations remain separate unless they satisfy the
-coherence rules above.
+Other independently changed operations remain separate unless the accepted
+deterministic grouping heuristics connect them. Shared file membership does
+not prove business coherence.
 
 ### Affected REST operation mapping
 
@@ -1111,6 +1593,25 @@ cards. Each type cause retains its finding IDs and displays only verified
 method-specific paths, request/response locations, and baseline/target roles.
 An indirect impact does not imply a changed top-level method signature.
 
+Every method card shows the recorded public Before/After signature, including
+unchanged signatures, while excluding client-bound and constant parameters.
+Missing facts remain explicitly unavailable. Keep the existing method-card,
+Before/After table, intent links, and yellow explanation layout. Show input
+and output model names, a compact field location, and concrete member
+differences before supporting evidence. Reference chains, normalized method
+metadata, constant headers, and detailed assessment rationales are collapsed
+by default. Put target-only new-field associations in a separate collapsed
+related-types section, rather than suggesting an existing method's contract
+was broken by a path that did not exist before. An added field that connects
+an already-confirmed related type may be shown as model context, explicitly
+not as another finding. Preserve both comparison
+roles and counterpart method/type facts even when a path exists on only one
+side. A target-only new-property badge requires a recorded baseline parent
+model that lacks that property; absent graph evidence alone is insufficient.
+Such an association does not establish a separate existing-method break.
+Lifecycle metadata such as Create-only is descriptive, not proof that a
+property is absent from a REST response schema.
+
 The renderer uses explicitly supplied, matching downstream graph evidence.
 Without it, recorded method associations remain visible but precise paths and
 locations are unavailable. Root-wide location unions must not be presented as
@@ -1137,6 +1638,12 @@ Relationships between Semantic intents and confirmed findings are
 - each Semantic intent records its related REST finding, downstream method
   group, and SDK type impact IDs.
 
+The authoritative relationship is established before judgment in the
+candidate-to-change-fact/intent ownership mapping. Assembly inherits approved
+finding ownership from that mapping. The matchers below are consistency checks
+and legacy evidence bridges; they are not permission to reconstruct or replace
+ownership from display text after the fact.
+
 The primary affected-operation list inside a Semantic intent contains REST
 operations only. Static impact links target related SDK method cards or
 unmapped-type fallback cards. Selecting a link opens its enclosing details;
@@ -1151,17 +1658,19 @@ Allowed relationship evidence:
 3. SDK type impact to Semantic intent: exact changed TypeSpec declaration
    identity from its findings. A deterministic TCGC path identifies affected
    SDK methods but does not transfer REST operation ownership.
-4. Unique source fallback: allowed only when one and only one Semantic intent
-   owns the relevant changed declaration/hunk and no stronger identity mapping
-   exists.
+4. Unique source fallback: allowed only when the authoritative ownership
+   ledger proves that one and only one Semantic intent owns the relevant
+   changed declaration/hunk and no stronger identity mapping exists.
 
 Project-wide source lists are not unique source evidence. A downstream
 candidate referencing every changed file in a project cannot use source
 fallback.
 
-When deterministic evidence cannot identify one or more correct relationships,
-leave the item unlinked and record an unresolved relationship reason in JSON.
-Do not link every plausible intent and do not ask the Agent to choose.
+When deterministic evidence cannot identify correct candidate ownership,
+retain the candidate, record an ownership diagnostic, and block new-run
+finalization rather than silently producing an orphan finding. Legacy data may
+still render an unresolved relationship, but new-format findings cannot be
+unowned. Do not link every plausible intent and do not ask the Agent to choose.
 
 Validation requires:
 
@@ -1170,7 +1679,11 @@ Validation requires:
 - every relationship includes its match basis;
 - its match basis is supported by deterministic evidence;
 - rejected findings are never linked;
-- ambiguous or unsupported relationships remain absent.
+- every retained new-format finding has at least one owner;
+- candidate IDs and fact/intent mappings are preserved through judgment and
+  assembly; and
+- ambiguous or unsupported ownership blocks finalization without deleting the
+  candidate.
 
 ## 6. Documentation-grounded Azure Guidelines
 
@@ -1202,7 +1715,8 @@ Azure.Core resource-operation interface guides out of this catalog.
 
 ### Query profile
 
-Build one query profile per Semantic intent from deterministic evidence:
+Build one query profile per frozen intent or unresolved seed scope from
+deterministic evidence:
 
 - ARM or data-plane service kind;
 - intent action and summary;
@@ -1219,6 +1733,13 @@ The deterministic request retains the complete source/hunk inventory for
 traceability, but the Azure Guidelines prompt is bounded to the compact intent
 profile above. Operation facts are excluded because Azure Guidelines evaluates the
 TypeSpec design intent, not each compiled operation.
+
+For deterministic file groups, preserve the complete eligible declaration
+scope supplied by the coordinator. Rank/fetch documents once across those
+profiles, not once per declaration. Coverage must
+show that each eligible source scope contributes to exactly one final intent
+decision; a grouping change cannot turn an eligible feature into informational
+publication or erase its Guidelines request.
 
 ### Select the four highest-scoring documents
 
@@ -1498,9 +2019,15 @@ never changes scoped REST/downstream safety.
 
 File: `model-input.json`
 
+Include frozen Semantic units and optional bounded `intentGroupingRequests`
+using the contract in section 3. Grouping requests are separate from
+REST/downstream `inferenceRequests`; deterministic compatibility coverage does
+not prove business coherence. Candidate IDs, source facts, and eligible
+Guidelines scopes remain conserved while the Agent resolves permitted groups.
+
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "context": {
     "sourceComparison": {
       "baseCommit": "base-sha",
@@ -1556,6 +2083,8 @@ File: `model-input.json`
   "semanticReviewUnits": [
     {
       "reviewUnitId": "semantic-<hash>",
+      "classificationVersion": 3,
+      "groupingEvidence": { "reasons": ["source:source-<hash>"] },
       "action": "add",
       "declarationKinds": ["model"],
       "qualifiedNames": ["Contoso.AddressPrefixSet"],
@@ -1647,6 +2176,7 @@ File: `model-input.json`
       "unchangedInventories": true,
       "unreferencedFacts": true,
       "unreferencedDeterministicFacts": true,
+      "restCandidateEvidenceFacts": false,
       "sourceChanges": true,
       "repeatedDeclarationIds": true,
       "repeatedReviewUnitEvidence": true
@@ -1669,6 +2199,44 @@ changed constructs, and query terms are bounded summaries with total counts;
 the Agent resolves the canonical entry when omitted members are material to a
 decision. Required evidence is never silently dropped to fit the budget.
 
+For operation-heavy REST changes, each candidate remains in bounded input with
+its ID, rule, severity, operation identity, exact contract-change location,
+actual/expected summary, and canonical artifact reference. Repeated full
+before/after AutoRest operation facts are not inlined once the candidate fan-out
+crosses the bounded-evidence limit. The shared evidence set keeps source, hunk,
+and declaration provenance and points to the exact candidate in
+`dimensions/rest-breaking-input.json`, where the complete fact IDs and
+contracts remain available for targeted resolution. `inputAccounting` records
+this as `omittedRedundant.restCandidateEvidenceFacts: true`. This compacts
+serialization only: every REST candidate still requires an explicit Agent
+decision and remains independently reportable.
+
+The bounded projection is built from the approved per-dimension decisions:
+
+- **REST:** retain every raw compatibility candidate and unresolved wire
+  question once; omit only contracts with complete REST equivalence proof.
+- **Downstream SDK:** retain every raw candidate and unresolved customization
+  question once; reference a shared type graph instead of repeating it for
+  every consumer; omit only scopes with complete represented neutral-SDK
+  equivalence proof.
+- **Azure Guidelines:** retain compact changed design facts and version or
+  dependency events that require guidance judgment; never serialize a full
+  unchanged-operation inventory merely because the event affects many
+  operations.
+- **Documentation Completeness:** continue to produce deterministic
+  compiler-presence results without Agent input.
+
+Compaction operates on evidence serialization, not assessment identity. It may
+deduplicate shared facts, graph paths, and proof records, but it does not merge
+or discard candidates, facts, intents, or finding ownership. The complete
+audit ledger remains in canonical artifacts referenced from `model-input.json`.
+
+`inputAccounting` records the actual UTF-8 byte length of canonical serialized
+`model-input.json` and, when different, the actual bounded Agent input. It also
+records included and omitted scopes by dimension, governing rules, and proof
+references. A short summary is not a context reduction if the original
+inventory is still serialized elsewhere in the Agent workspace.
+
 ### 7.1 Deterministic coverage and optional inference
 
 Coverage is calculated before `model-input.json` is written. For each Semantic
@@ -1681,6 +2249,14 @@ review unit, every member hunk receives exactly one deterministic status:
 - `unknown`: the source change cannot be mapped reliably to the available
   language-neutral artifacts;
 - `blocked`: required deterministic artifacts or analysis are unavailable.
+
+These statuses describe compatibility-analysis coverage, not whether semantic
+grouping is deterministic or readable. Keep existing physical hunk accounting;
+scope requests to their relevant declaration facts when a mixed hunk supports
+more than one semantic change. Provisional requests remain keyed to immutable
+seed/fact scopes and are joined to final intent membership during
+materialization. A version decorator cannot redirect feature impact to
+publication.
 
 Only `unknown` hunks set `inferenceRequired: true`. An empty candidate list
 alone does not trigger inference. Azure Guidelines retrieval failure also does not
@@ -1697,7 +2273,7 @@ Each unknown hunk produces one bounded `inferenceRequests` entry:
   "reason": "source-change-not-represented-in-language-neutral-artifacts",
   "sourceExcerpt": "@@clientLocation(..., \"!csharp,!go\");",
   "relatedOperationIds": [],
-  "allowedDimensions": ["rest", "downstream"],
+  "allowedDimensions": ["downstream"],
   "evidenceRef": {
     "artifact": "source/source-index.json",
     "sourceChangeId": "source-<hash>",
@@ -1705,6 +2281,14 @@ Each unknown hunk produces one bounded `inferenceRequests` entry:
   }
 }
 ```
+
+`allowedDimensions` is coordinator-generated input: it constrains inferred
+candidates and the scope of any unresolved inference blocker. Known SDK-only
+decorator-only changes and isolated TypeScript
+`experimental-split-models-by-visibility` option changes use `["downstream"]`.
+Mixed or unrecognized hunks retain `["rest", "downstream"]`; a filename or
+group label alone is not evidence that a change cannot affect REST. The
+assembler preserves confirmed findings independently of a scoped blocker.
 
 When `inferenceRequests` is empty, `inference.json` must not be required. When
 requests exist, the Agent writes one result per request to `inference.json`:
@@ -1759,12 +2343,20 @@ deterministic materializer resolves those names within the owning request and
 emits the existing judgment contract below; it does not choose decisions,
 severities, evidence, or prose.
 
+The compact contract does not add grouping decisions. Summarize and judge the
+coordinator's frozen units, retaining existing facts and grouping reasons.
+Broad file-based units are permitted; Agent prose must not claim that their
+membership proves a single business goal. Leave original input artifacts
+immutable, and keep candidate decisions keyed by their unchanged candidate
+IDs. Category, derivation, and Agent-regrouping contracts remain deferred.
+
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "semanticIntents": [
     {
       "reviewUnitId": "semantic-<hash>",
+      "changeFactIds": ["change-fact-<hash>"],
       "title": "Return scenario-run resources from run actions",
       "summary": "The TypeSpec change makes scenario execution and cancellation return pollable scenario-run resources."
     }
@@ -1810,11 +2402,13 @@ severities, evidence, or prose.
 }
 ```
 
-Exactly one semantic result is required per review unit and one decision per
-deterministic or inferred REST/downstream candidate. Root causes are
+Exactly one semantic result is required per frozen intent or resolved inferred
+group and one decision per deterministic or inferred REST/downstream candidate. Root causes are
 deterministic aggregation evidence and are not Agent decision units.
 
 Every Semantic intent must have exactly one Azure Guidelines decision. Every
+eligible seed scope contributes to its final group's exact decision scope;
+request-local keys resolve to final membership-derived IDs. Every
 applicable guidance catalog ID in the compact input must identify a
 successfully fetched `rankedDocuments` entry, and all source, hunk, and
 declaration IDs must already exist in canonical requests. Decisions may quote
@@ -1837,7 +2431,7 @@ File: `assessment.json`
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "generatedAt": "2026-01-01T00:00:00.000Z",
   "title": "TypeSpec assessment: specification/<service>/<project>",
   "repository": {
@@ -1880,6 +2474,11 @@ File: `assessment.json`
       "items": [
         {
           "id": "semantic-<hash>",
+          "intentType": "normal",
+          "classificationVersion": 3,
+          "groupingEvidence": { "reasons": ["source:source-<hash>"] },
+          "changeFactIds": ["change-fact-<hash>"],
+          "publishedIn": [],
           "action": "add|remove|modify",
           "title": "Modify scenario run actions",
           "summary": "Source-first TypeSpec intent.",
@@ -2178,7 +2777,8 @@ evidence. Final validation independently checks:
    candidate covered exactly once;
 3. no invented or duplicate IDs;
 4. complete actual/expected/evidence/source for findings;
-5. exact one-time changed TypeSpec hunk coverage;
+5. complete existing primary TypeSpec hunk coverage, without counting shared
+   evidence references as additional physical sources;
 6. complete REST operation evidence;
 7. reciprocal semantic/finding relationships;
 8. complete downstream aggregation traceability;
@@ -2202,7 +2802,43 @@ evidence. Final validation independently checks:
 18. documentation findings quote actual target text, retain canonical source
     context, and contain no authored severity or fabricated evidence;
 19. missing documentation input remains explicitly `not-assessed` for legacy
-    artifacts; missing decisions for new input are rejected.
+    artifacts; missing decisions for new input are rejected;
+20. every changed construct is represented by a structured change fact or an
+    explicit unresolved diagnostic;
+21. change facts contain change type, declaration kind, action, facets, and
+    before/after evidence under the selected comparison scope;
+22. existing primary physical hunk ownership remains valid; semantic membership
+    gives each fact one primary intent owner independently of that bookkeeping.
+    mixed operation/type/versioning facts may share a coarse source-file group
+    without establishing one coherent business feature;
+23. every raw candidate is present exactly once in judgment accounting or has
+    complete selector-only exclusion proof;
+24. shared/common-type evidence may be deduplicated, but candidate identities
+    and all affected-operation relationships remain complete;
+25. each omitted Agent scope has a dimension-specific rule and scope-matched
+    evidence; no intent-wide informational category authorizes omission;
+26. every aggregated carry-over operation has unique identity plus complete
+    REST and represented neutral-SDK equivalence proof;
+27. `different` or `unknown` operation pairs never enter carry-over;
+28. every retained finding inherits at least one evidence-backed intent owner
+    from authoritative candidate, inference, compiler, or Guidelines scope;
+29. candidate/fact/intent and finding/intent relationships remain reciprocal;
+30. actual serialized model-input and Agent-input byte counts are recorded;
+31. version decorators remain supporting applicability for their feature;
+    publication owns only compiler-identified new-version declaration/metadata;
+32. existing intent types, classification version, and heuristic grouping
+    reasons are explicit; no Agent split/merge changes group membership;
+33. no grouping changes candidate inventory or loses eligible Guidelines,
+    compiler documentation, or breaking-inference scope coverage;
+34. final input policy agrees with final membership and proof scope; different,
+    unknown, stale, or vacuously empty comparisons cannot justify unchanged
+    treatment of a nonempty scope; and
+35. deterministic replay preserves facts, requests, proof, and frozen IDs;
+    replaying the same validated partition preserves final inferred IDs.
+
+Items 20-35 are blocking integrity requirements for new-format runs. Failure
+preserves diagnostics and candidates and prevents guarded finalization; it
+must not be converted into a pass-shaped result.
 
 ## 11. HTML requirements
 
@@ -2313,9 +2949,28 @@ Azure Guidelines rendering is source-first:
 
 ### Semantic rendering
 
+Keep the coordinator's coarse cards. Feature/contract cards summarize their
+actual file-grouped contents, with API-version decorators as secondary context;
+publication cards contain only publication. Display the deterministic grouping
+basis and reasons without claiming Agent-verified business coherence. Show
+fact, hunk, and supporting-operation counts and a collapsible raw fact table.
+A normal group containing `Versions` and other facts receives a visible
+mixed-group notice. A mixed hunk does not require one card per declaration.
+
+Changed unresolved AutoRest schema/parameter references remain explicit
+evidence blockers, not proof of compatibility or of a break. Keep their raw
+candidate identities and judgments in ready analyzer input, but assemble the
+affected compatibility dimension as `not-assessed` when its evidence blockers
+remain. This also applies when only some projects could be analyzed.
+
+Distinguish directly changed operations, propagated affected operations, and
+verified unchanged carry-over. Do not add a release-parent relationship or
+transfer feature facts/findings to publication. Counts and broad source
+snippets do not prove a single business goal.
+
 Semantic operation rendering is bounded:
 
-- render a concise aggregate impact sentence and no more than three
+- render a concise aggregate impact sentence and no more than ten
   representative expandable operation cards for every intent;
 - choose representatives deterministically in stable operation-ID order;
 - state how many operations are omitted from HTML;
@@ -2550,12 +3205,28 @@ Preserve local assessment reports and user-owned eval changes.
 - One command prepares deterministic evidence and bounded Agent input.
 - AutoRest and TCGC use the same source revision and API version within each
   artifact-comparison role.
-- Semantic analysis covers changed TypeSpec source before calculating REST
-  impact.
+- Semantic analysis derives structured source-owned facts before business
+  grouping, with change type, declaration kind, action, facets, and
+  before/after evidence.
+- Feature-primary semantics are preserved: a coherent feature may aggregate
+  operation/type/versioning facts, while its version decorators remain
+  supporting applicability rather than publication.
+- Existing intent types and derived presentation labels retain actual
+  deterministic grouping reasons without a category/derivation schema migration.
+- Existing mixed-hunk/primary physical ownership remains supported; fact
+  membership determines semantic ownership without mandatory sub-hunk splitting.
 - REST and downstream analyzers follow emitter boundaries.
-- Every Semantic intent produces one bounded Azure Guidelines query profile from its
-  changed constructs, representative source evidence, and aggregate operation
-  counts.
+- Raw candidate analysis remains independent of semantic filtering; every
+  candidate is judged or has exact selector-only exclusion proof.
+- Per-dimension Agent-input decisions replace intent-wide informational
+  exclusions and retain their governing rule and evidence.
+- Verified unchanged operations use proof-backed aggregated carry-over;
+  `different` and `unknown` pairs remain outside it.
+- Shared/common-type evidence is compared once per distinct identity and
+  projection context without dropping candidate identities or affected
+  relationships.
+- Frozen coordinator intents produce bounded Guidelines query profiles and
+  receive one final decision each, without Agent regrouping.
 - Catalog scoring selects the four highest-ranked retrievable official
   documents once across all intents, with failed attempts and
   replacements preserved.
@@ -2564,7 +3235,8 @@ Preserve local assessment reports and user-owned eval changes.
 - Every Semantic review unit records deterministic hunk coverage directly in
   `model-input.json`.
 - AI inference is skipped when all hunks are deterministically classified and
-  runs only for explicit `unknown` hunk requests.
+  runs only for explicit `unknown` hunk requests for compatibility. There is
+  no semantic regrouping phase; hunk coverage does not prove business coherence.
 - When inference runs, `inference.json` has exact request coverage and only
   bounded, source-linked inferred candidates.
 - Agent judgment has one concise Semantic result and one Azure Guidelines decision
@@ -2575,17 +3247,266 @@ Preserve local assessment reports and user-owned eval changes.
   text is never compared with code.
 - Documentation findings do not introduce guessed severity or change scoped
   REST/downstream safety.
-- Final JSON rejects unsupported or incomplete results.
+- Every finding has evidence-backed intent ownership inherited from its
+  candidate, inference, compiler, or Guidelines scope.
+- Final JSON rejects unsupported, unowned, or incomplete results.
+- Every changed fact has a clear semantic owner; publication owns no feature
+  facts; coarse source groups retain explicit provenance; every impact finding links to
+  the actual owning change. Nonempty associations alone are insufficient.
 - HTML presents ranked documentation and intent-level Azure Guidelines results
   without conflating them with scoped REST/downstream code safety.
-- Focused tests, 12 retained report replays, strict skill lint, and real PR
-  43308, 44882, and 44988 smoke tests pass.
-- PR 44988 produces 11 coherent Semantic intents, no REST breaking finding for
-  the new-version transition, and two grouped Service Gateway downstream SDK
-  method breaks, and ranks the expected four documents for the AddressPrefixSet
-  intent.
+- Actual canonical model-input bytes and actual bounded Agent-input bytes are
+  recorded alongside execution timing and coverage accounting.
+- The mandatory three-PR verification in section 14 completes successfully.
+- The mandatory nine-core regeneration and GitHub Pages publication in
+  section 15 completes successfully.
 
-## 14. Technical challenges
+These are completion gates for the revised design. Earlier reports and
+publication exist, but publication purity failed in several of them.
+Implementation and report refresh/publication are authorized by the current
+request. Assessments and deployment must satisfy the recorded completion gates;
+the design document alone is not evidence that they have completed.
+
+## 14. Mandatory verification and performance evidence
+
+Verification is mandatory for exactly these three PRs:
+
+| PR                                                                 | Purpose                                           | Required assertions                                                                                                                                                                                                                                                                                                                                   |
+| ------------------------------------------------------------------ | ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [#46679](https://github.com/Azure/azure-rest-api-specs/pull/46679) | Accepted broad source grouping                    | Preserve the preview's two groups: the broad main.tsp contract group and generation configuration. Keep operation/type facts out of any publication label and display the mixed version/source notice. Do not force a separate publication leaf. Preserve supported findings and account for historical candidate differences.                        |
+| [#44988](https://github.com/Azure/azure-rest-api-specs/pull/44988) | Large Network API-version publication             | Keep both rule `sourceKubeSelectorGroups` additions outside publication, with their coherent feature. Retain the other real additions/changes and independent Guidelines eligibility. Reject the historical partial-proof/149-different-pairs informational contradiction; derive carry-over solely from proof without per-operation Agent expansion. |
+| [#45348](https://github.com/Azure/azure-rest-api-specs/pull/45348) | Common-type version change with broad propagation | Compare the effective common-type delta once and retain the complete affected-operation mapping and every candidate identity. Verify the common-types v6 to v5 change against the PR's actual target comparison; do not assume common-type origin or a breaking-fix description means no finding.                                                     |
+
+Freeze each PR's actual target merge base and head commit, selected artifact
+source commits/API versions, assessment-tool revision, compiler/emitter
+versions, and relevant options. The recorded comparisons to reproduce are:
+
+| PR     | Target merge base                          | PR head                                    |
+| ------ | ------------------------------------------ | ------------------------------------------ |
+| #46679 | `b306e248a9e097d2b22e80030318c3d0080933dd` | `75c564b29d32d4da78bc5e8f6e38cbd8cb553b08` |
+| #44988 | `9f0ad696cc186c2d16cb522abc0fbd4aa3854ca5` | `780a61ace56c22ce10dd01caa8ab95ca4514ac2e` |
+| #45348 | `2991970c5377110244bcf9614be03e5aaf32362f` | `b209254310b3e569b16210d3c59fc8b8ac3b84b4` |
+
+For each PR, compare the historical report with a newly finalized assessment
+under the accepted implementation. Hash-verified frozen preparation/compiler
+artifacts may be reused while rerunning current deterministic analysis, bounded
+judgment, materialization, and guarded finalization in a new directory.
+Preserve the actual source and API-version comparison and every input hash.
+Do not substitute historical judgments or a semantic-only preview for the new
+complete report. Fresh-compilation benchmarking is a separate measurement,
+not a prerequisite for this explicitly labeled replay rollout.
+
+Record a machine-readable performance artifact with:
+
+| Measurement          | Definition                                                                                                                                                                                                                          |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `executionTimeMs`    | Wall time immediately before coordinator invocation through successful guarded finalization, including preparation, deterministic analysis, Agent work, guidance retrieval, materialization, and finalization.                      |
+| `coordinatorTimeMs`  | Coordinator invocation through the ready-for-Agent boundary, including preparation and compilation.                                                                                                                                 |
+| `agentPhaseTimeMs`   | Ready-for-Agent boundary through completed Agent decisions, including inference and Guidelines retrieval/judgment.                                                                                                                  |
+| `finalizationTimeMs` | Materialization/finalization after Agent decisions through successful guarded finalization.                                                                                                                                         |
+| Model-input bytes    | UTF-8 bytes of canonical serialized `model-input.json` and, separately when different, the actual bounded Agent input.                                                                                                              |
+| Coverage/accounting  | Source hunks and facts; existing intent types and grouping reasons; strict publication eligibility and mixed-source notices; dimension scopes; affected/carry-over counts; candidates, findings, ownership, blockers, and outcomes. |
+
+For a frozen-preparation replay, record `kind: frozen-preparation-replay`,
+`freshPreparation: false`, and `freshCompilation: false`. Measure the new
+replay coordinator, Agent boundary, and finalization separately. A measured
+replay wall time includes actual intervening waits, but is not fresh
+compilation E2E; leave fresh E2E time null. Retain historical preparation
+timings as provenance, never add them to the new run's elapsed time or claim a
+fresh-build speedup.
+
+Record timestamps, status, cache conditions, setup work, and phase boundaries.
+Nested timings are diagnostic and are not added again to enclosing phases.
+Do not estimate execution time from PR size, tokens, operation counts, prior
+timestamps, or overlapping subtotals. Report deltas with an explicit sign
+convention and baseline denominator. A failed or blocked run retains its
+elapsed time and error status but is not presented as a completed report or
+speedup.
+
+Historical published baseline evidence, not acceptance of this revision:
+
+| PR     | New assessment report                                                                                             | Baseline execution time | Candidate execution time                                       | Time delta     | Model-input bytes before -> bounded Agent input | Verification result                                                                                                                                                                                            |
+| ------ | ----------------------------------------------------------------------------------------------------------------- | ----------------------- | -------------------------------------------------------------- | -------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| #46679 | [Published core report](https://haolingdong-msft.github.io/typespec-assessment-reports/reports/pr-46679/)         | Not measured            | Observed E2E `516,993 ms` (`8m 37s`); coordinator `201,850 ms` | Not measurable | `185,520 -> 121,566`                            | Finalized historical report: 13 downstream findings and 1 Guidelines finding. Publication purity still fails; prior correctness acceptance was incomplete.                                                     |
+| #44988 | [Published verification report](https://haolingdong-msft.github.io/typespec-assessment-reports/reports/pr-44988/) | Not measured            | Observed E2E `525,813 ms` (`8m 46s`); coordinator `350,149 ms` | Not measurable | `267,029 -> 190,188`                            | Finalized historical report: 16 intents and 12 downstream candidates. Publication purity and proof/policy consistency fail; not accepted under this revision.                                                  |
+| #45348 | [Published verification report](https://haolingdong-msft.github.io/typespec-assessment-reports/reports/pr-45348/) | Not measured            | Observed E2E `206,123 ms` (`3m 26s`); coordinator `103,729 ms` | Not measurable | `228,906 -> 171,195`                            | Historical common-type control retains 237 REST findings. Current verification must preserve candidate identities and rejudge effective deltas and ownership; historical findings are not automatic approvals. |
+
+The observed E2E values use the exact coordinator stopwatch plus the recorded
+ready-for-Agent, Agent-decision, and finalized-assessment phase boundaries.
+They include intervening wall-clock waits and therefore describe user-observed
+report latency rather than a clean benchmark. In particular, #46679 includes
+approximately `149,869 ms` between Agent decisions and final output. The
+published
+[`core-performance.json`](https://haolingdong-msft.github.io/typespec-assessment-reports/core-performance.json)
+records the coordinator measurements, observed E2E boundaries, input
+accounting, candidate and finding counts, and this limitation.
+Correctness takes precedence over speed. New verification must establish
+feature-primary fact classification, publication eligibility, explicit grouping provenance,
+source/fact conservation, candidate coverage, all four impact dimensions, and
+proof/policy consistency. Earlier count/association checks did not establish
+those semantic requirements.
+
+Focused deterministic fixtures must cover at least selector-only publication,
+mixed version/contract hunks, reachable model changes with unchanged method
+signatures, missing/ambiguous evidence, cyclic graphs, project-qualified
+identities, shared types used by many operations, candidate conservation,
+orphan-finding rejection, independent Guidelines/documentation coverage, and
+stable deterministic/materialization replay. Extend them with these explicit
+semantic acceptance cases:
+
+| Fixture                                                                    | Required assertion                                                                                                                                                |
+| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@added` on a new operation/model/property                                 | Feature is primary; version applicability is supporting. No publication event without an actual new-version declaration.                                          |
+| `@removed`, `@renamedFrom`, or `@madeRequired`                             | Lifecycle/rename/requiredness belongs to the feature, even if additive or intentionally preview-only. Do not invent a breaking finding.                           |
+| Coherent operation/model/version-decorator facts in one mixed hunk         | One feature intent remains valid, with existing physical ownership intact; no needless decorator intent or token-span split.                                      |
+| New-version declaration and feature in one hunk                            | Keep the accepted coarse normal group and show its mixed-source notice; do not label it pure publication or force a split.                                        |
+| Several unrelated declarations sharing source/hunk text                    | No decorator/facet leakage; expose known context-only index rows without claiming they are newly authored features.                                               |
+| Broad main/models source grouping                                          | Preserve deterministic bucket membership and display its heuristic basis without claiming business coherence.                                                     |
+| Publication with non-version facts                                         | Explicit validation failure without candidate loss or relabeling feature facts as versioning.                                                                     |
+| Grouped Guidelines and compatibility-inference scopes                      | Exact eligible scope unions, one final intent decision, unchanged candidate/request coverage, no extra document retrieval pass.                                   |
+| #44988 partial proof with different/unknown pairs but informational policy | Reject stale or unsupported unchanged treatment, including zero-pair/vacuous-proof shortcuts.                                                                     |
+| #44101 and #43918 source fixtures                                          | VM-allocation addition and cluster-mesh availability changes remain feature-primary and outside publication. Both are also checked in the nine-core regeneration. |
+
+### First-look coordinator-only previews
+
+The user selected #44101, #43918, and #44988 for the first check, then added
+#46679 and #45348, explicitly skipping other assessment phases. A narrow prototype removes decorator-driven
+feature absorption into publication, scopes fact text/facets to individual
+declarations, and requires version-declaration-only publication evidence.
+Existing mixed-hunk/primary physical ownership is unchanged.
+
+| PR                                                                | Historical intents | Coordinator intent candidates | Publication intents | Interpretation                                                                           |
+| ----------------------------------------------------------------- | -----------------: | ----------------------------: | ------------------: | ---------------------------------------------------------------------------------------- |
+| [#44101 preview](http://127.0.0.1:50667/assessment.html#pr-44101) |                  6 |                             6 |                   1 | Three VM-allocation facts move to an existing non-publication model group.               |
+| [#43918 preview](http://127.0.0.1:50667/assessment.html#pr-43918) |                  3 |                             5 |                   1 | Eighteen availability-related facts leave publication.                                   |
+| [#44988 preview](http://127.0.0.1:50667/assessment.html#pr-44988) |                 16 |                            16 |                   1 | Four selector-property facts move to an existing non-publication model group.            |
+| [#46679 preview](http://127.0.0.1:50667/assessment.html#pr-46679) |                  3 |                             2 |                   0 | Preserve broad main-file and configuration groups, with an explicit mixed-source notice. |
+| [#45348 preview](http://127.0.0.1:50667/assessment.html#pr-45348) |                  1 |                             1 |                   0 | Shared-dependency control; 109 operation relationships are not 109 authored intents.     |
+
+The runs replay updated coordinator semantic analysis against existing frozen
+prepared compiler/AutoRest/TCGC artifacts. The three eligible publication groups
+contain only `Versions`; prior non-version facts have non-publication owners, and
+physical hunk coverage is preserved. There was no new preparation, Agent,
+compatibility judgment, Guidelines/documentation assessment, guarded
+finalization, or deployment. This is not a full-assessment E2E measurement.
+
+The local HTML uses deterministic declaration-based labels, not Agent-authored
+business summaries. Some existing source/file-based groupings remain broad,
+notably #44101's shared model group. These are visible coordinator candidates,
+not completed compatibility assessments. The user subsequently accepted this
+coarse grouping and deferred finer category/derivation/grouping migrations.
+The preview still does not satisfy complete judgment/finalization/publication.
+
+### Historical affected-report audit (outside the current refresh cohort)
+
+The earlier audit identified this ten-case defect set. Preserve it as
+historical comparison evidence; the current refresh request selects only the
+nine-core and three-verification cohorts, not ten additional assessment runs:
+
+| PR     | Feature semantics that must remain outside publication                                       |
+| ------ | -------------------------------------------------------------------------------------------- |
+| #46679 | Storage compliance lock, SaaS activation, cloud-account inputs, and role-assignment changes. |
+| #44101 | `VmAllocationInfo`, `vmSize`, and `zone` additions.                                          |
+| #43918 | Cluster-mesh availability/non-promotion changes.                                             |
+| #44988 | Both rule `sourceKubeSelectorGroups` additions and the related Kubernetes-selector feature.  |
+| #43855 | Management-group recommendation scope and models.                                            |
+| #44200 | Frontend public-network access, associations, and private-link declarations.                 |
+| #44332 | Managed identity and authentication/administrator models.                                    |
+| #44334 | A365 logging and account/compute properties.                                                 |
+| #44384 | User-delegation SAS policy and Context Cache changes.                                        |
+| #45167 | `SecretArchiveReference.encryptionPublicKey`.                                                |
+
+The audit motivates the accepted classification and presentation changes; it
+does not add ten mandatory refresh runs. For selected cases, inspect
+feature-first titles/summaries, supporting version applicability, publication
+purity, existing grouping reasons, and physical coverage. Conserve candidates,
+supported findings, and independent Guidelines/documentation coverage. Record
+intent differences and measured timing under its actual fresh/replay boundary.
+
+This defect set overlaps, but does not redefine, the three-verification or
+nine-core cohort. #45348 remains the shared-dependency control. Current
+publication authorization applies to the eleven selected unique reports,
+not the remaining historical audit cases.
+
+## 15. Mandatory nine-core regeneration and GitHub Pages publication
+
+After implementation, focused tests, and all three mandatory verification PRs,
+the final mandatory stage is to regenerate all nine core assessments with the
+final candidate revision and publish their finalized reports to the
+[GitHub Pages dashboard](https://haolingdong-msft.github.io/typespec-assessment-reports/).
+The design is not operationally complete until this stage succeeds.
+
+The user has authorized implementation, report refresh, and GitHub Pages
+publication. This does not authorize committing the assessment-skill changes.
+The three verification PRs overlap the nine-core cohort at #46679, so publish
+eleven unique finalized reports, retaining all other historical reports.
+
+The nine core PRs are:
+
+1. #44288
+2. #44920
+3. #44101
+4. #44557
+5. #46008
+6. #43918
+7. #43757
+8. #39064
+9. #46679
+
+#44988 and #45348 remain additional optimization-verification cases; they do
+not replace or automatically join the nine-core cohort.
+
+Run the core PRs sequentially with each PR's actual target comparison and a
+fresh isolated output directory. For every PR:
+
+1. run current deterministic analysis through guarded finalization, either
+   with fresh preparation or explicitly labeled hash-verified preparation replay;
+2. complete all bounded Agent judgment;
+3. require guarded finalization to produce validated `assessment.json` and
+   `assessment.html`;
+4. record source/artifact comparisons, tool and classification/context-policy
+   versions, execution time, input size, blockers, and dimension outcomes;
+5. compare with the prior report and accepted review disposition, explaining
+   every difference rather than treating prior acceptance as automatic
+   approval. Explicitly inspect publication purity and feature-primary
+   semantics, especially #44101, #43918, and #46679; and
+6. stage only finalized report artifacts.
+
+Publish all eleven selected finalized report directories and dashboard/index metadata as
+one coherent change to the GitHub Pages source repository. Preserve provenance
+and historical comparison data. Do not copy historical reports as new output,
+overwrite incomplete evidence, or leave the dashboard pointing to a mixture
+of stale and regenerated core reports.
+
+After deployment verify that all eleven public URLs succeed, identify the
+expected spec PR and final tool/classification version, match the finalized
+local artifact hashes, and are linked from the dashboard. Verify that no
+unselected historical report was unintentionally replaced.
+
+Also publish `combined.html`: a single continuous view with top PR anchor
+navigation for all eleven reports, matching the accepted preview layout.
+Each section retains the complete finalized report and its independent HTML
+and JSON links. Open this combined view after deployment, rather than only
+returning a link directory or a table of counts.
+
+Produce a publication manifest containing each PR, finalized local artifact
+paths, artifact hashes, public report URL, deployment commit, and verification
+status. Publication is incomplete if any core run is blocked, any report is
+not finalized, deployment fails, or a public URL/hash does not match.
+
+The earlier nine-core publication completed in deployment commit
+`93eb09fc231cf1f49f124b54fc7269af19d4d103`. GitHub Pages returned `200` for
+every report HTML and `assessment.json`, and every deployed artifact hash
+matched the finalized local source. At that deployment the dashboard contained
+32 reports: the original 30-case sample plus attribution-driven #44288 and
+#44101. Two additional verification reports were subsequently published,
+bringing the audited dashboard to 34. The historical verified
+[`publication-manifest.json`](https://haolingdong-msft.github.io/typespec-assessment-reports/publication-manifest.json)
+records the local paths, hashes, public URLs, deployment commit, workflow run,
+and verification timestamp for all nine core PRs. Deployment/hash verification
+does not establish publication-intent purity or acceptance of this revision.
+
+## 16. Technical challenges
 
 The primary technical challenge is constructing and reconciling several
 incomplete graphs of the same API change:

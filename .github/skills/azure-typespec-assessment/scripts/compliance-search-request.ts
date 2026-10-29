@@ -186,20 +186,65 @@ function materialDeclarations(unit: SemanticReviewUnit, sources: SourceChange[])
   return [...byIdentity.values()].sort((left, right) => left.id.localeCompare(right.id));
 }
 
+function isArmRoute(value: unknown) {
+  return (
+    typeof value === "string" &&
+    /\/(?:subscriptions\/\{[^}]+\}|providers\/Microsoft\.)/i.test(value)
+  );
+}
+
+function projectServicePlanes(
+  semanticReviewUnits: SemanticReviewUnit[],
+  semanticFacts: Record<string, AssessmentFact>,
+) {
+  const result = new Map<string, "resource-manager">();
+  for (const unit of semanticReviewUnits) {
+    if (!unit.projectId) continue;
+    const operationFactIds = (unit.operations ?? []).flatMap((operation) =>
+      [operation.beforeFactId, operation.afterFactId].filter(
+        (id): id is string => Boolean(id),
+      ),
+    );
+    if (
+      operationFactIds.some((id) => {
+        const fact = semanticFacts[id];
+        return isArmRoute(fact?.path) || isArmRoute(fact?.operation?.path);
+      })
+    ) {
+      result.set(unit.projectId, "resource-manager");
+    }
+  }
+  return result;
+}
+
 export function buildComplianceSearchRequests({
   semanticReviewUnits,
   sourceChanges,
+  semanticFacts = {},
 }: {
   semanticReviewUnits: SemanticReviewUnit[];
   sourceChanges: Record<string, SourceChange>;
+  semanticFacts?: Record<string, AssessmentFact>;
 }) {
+  const servicePlanes = projectServicePlanes(semanticReviewUnits, semanticFacts);
   return semanticReviewUnits.map((unit) => {
     const sources = unit.sourceChangeIds.map((id) => sourceChanges[id]).filter(Boolean);
     const declarations = materialDeclarations(unit, sources);
     const tokens = changedTokens(sources, unit.hunkIds ?? []);
-    const servicePlane = sources.some((source) => /(^|\/)resource-manager(\/|$)/i.test(source.path))
-      ? "resource-manager"
-      : "data-plane";
+    const symbols = uniqueSorted(declarations.flatMap(declarationSymbols));
+    const armSymbols = [...symbols, ...tokens].some(
+      (symbol) =>
+        /^Azure\.ResourceManager(?:\.|$)/i.test(symbol.replace(/^@/, "")) ||
+        /^(?:Arm[A-Z]|TrackedResource$|ProxyResource$|TenantResource$|ExtensionResource$)/.test(
+          symbol.replace(/^@/, "").split(".").at(-1) ?? "",
+        ),
+    );
+    const servicePlane =
+      sources.some((source) => /(^|\/)resource-manager(\/|$)/i.test(source.path)) ||
+      armSymbols ||
+      (unit.projectId && servicePlanes.get(unit.projectId) === "resource-manager")
+        ? "resource-manager"
+        : "data-plane";
     const request = {
       reviewUnitId: unit.id,
       sourceChangeIds: [...unit.sourceChangeIds].sort(),
@@ -210,7 +255,7 @@ export function buildComplianceSearchRequests({
         action: unit.action ?? unit.changeKind ?? "modify",
         declarationKinds: uniqueSorted(declarations.map((item) => item.kind)),
         qualifiedNames: uniqueSorted(declarations.map((item) => item.qualifiedName)),
-        symbols: uniqueSorted(declarations.flatMap(declarationSymbols)),
+        symbols,
         categories: categories(declarations, tokens),
         changedTokens: tokens,
         representativeSourceExcerpts: representativeSourceExcerpts(sources, unit.hunkIds ?? []),
@@ -225,6 +270,8 @@ export function buildComplianceSearchRequests({
 }
 import { stableId } from "./stable-id.ts";
 type SemanticReviewUnit = import("./runtime-types.ts").SemanticReviewUnit;
+
+type AssessmentFact = import("./runtime-types.ts").AssessmentFact;
 
 type SourceChange = import("./runtime-types.ts").SourceChange;
 

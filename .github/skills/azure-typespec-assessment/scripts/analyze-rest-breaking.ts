@@ -123,6 +123,26 @@ function same(left: unknown, right: unknown) {
     : canonicalJson(left) === canonicalJson(right);
 }
 
+function changedUnresolvedEvidence(before: unknown, after: unknown): boolean {
+  if (same(before, after)) return false;
+  const isObject = (value: unknown): value is Record<string, unknown> =>
+    value !== null && typeof value === "object";
+  if (
+    [before, after].some(
+      (value) =>
+        isObject(value) &&
+        (value.unresolved === true || typeof value.unresolvedReference === "string"),
+    )
+  ) {
+    return true;
+  }
+  const baseline = isObject(before) ? before : {};
+  const target = isObject(after) ? after : {};
+  return [...new Set([...Object.keys(baseline), ...Object.keys(target)])].some((key) =>
+    changedUnresolvedEvidence(baseline[key], target[key]),
+  );
+}
+
 function pairs(base: NormalizedAutorestOperation[], current: NormalizedAutorestOperation[]) {
   const currentByKey = new Map(current.map((item) => [logicalKey(item), item]));
   const used = new Set();
@@ -296,6 +316,7 @@ function description(change: BreakingChange, operationId: string) {
 function compareOperation(
   before: NormalizedAutorestOperation,
   after: NormalizedAutorestOperation | undefined,
+  newApiVersion: boolean = false,
 ): BreakingChange[] {
   if (!after) return [{ rule: "operation-removed" }];
 
@@ -318,6 +339,19 @@ function compareOperation(
         rule: moved ? "parameter-location-changed" : "parameter-removed",
         location: parameter.name,
       });
+      continue;
+    }
+    if (
+      newApiVersion &&
+      parameter.in === "query" &&
+      parameter.name === "api-version" &&
+      before.apiVersion &&
+      after.apiVersion &&
+      before.apiVersion !== after.apiVersion &&
+      parameter.required === current.required &&
+      parameter.collectionFormat === current.collectionFormat &&
+      selectorSchemaOnly(parameter.schema, current.schema, before.apiVersion, after.apiVersion)
+    ) {
       continue;
     }
     if (!parameter.required && current.required) {
@@ -414,6 +448,32 @@ function compareOperation(
   });
 }
 
+function selectorSchemaOnly(
+  before: NormalizedSchema | undefined,
+  after: NormalizedSchema | undefined,
+  baselineVersion: string,
+  targetVersion: string,
+): boolean {
+  const normalize = (schema: NormalizedSchema | undefined, version: string) => {
+    if (
+      schema?.kind !== "enum" ||
+      schema.values?.length !== 1 ||
+      schema.values[0] !== version ||
+      (schema.default !== undefined && schema.default !== version)
+    ) {
+      return undefined;
+    }
+    return {
+      ...schema,
+      values: ["<api-version>"],
+      ...(schema.default !== undefined ? { default: "<api-version>" } : {}),
+    };
+  };
+  const baseline = normalize(before, baselineVersion);
+  const target = normalize(after, targetVersion);
+  return baseline !== undefined && target !== undefined && same(baseline, target);
+}
+
 export function analyzeRestBreaking(options: {
   manifest: string | PreparationManifest;
   manifestPath?: string;
@@ -447,11 +507,18 @@ export function analyzeRestBreaking(options: {
       const base = normalizeAutorestContract({ workRoot, artifact: baseArtifact });
       const current = normalizeAutorestContract({ workRoot, artifact: currentArtifact });
       const source = evidence(project, sourceIndex);
+      const unresolvedOperations: string[] = [];
       for (const { before, after } of pairs(base.operations, current.operations)) {
         if (!before) continue;
-        const changes = compareOperation(before, after);
+        const changes = compareOperation(
+          before,
+          after,
+          project.artifactComparison?.mode === "new-api-version",
+        );
         if (!changes.length) continue;
-        if (project.artifactComparison?.mode === "new-api-version") continue;
+        if (after && changedUnresolvedEvidence(before, after)) {
+          unresolvedOperations.push(before.operationId);
+        }
         const beforeFactId = operationFact(facts, project, "baseline", before);
         const afterFactId = after ? operationFact(facts, project, "target", after) : undefined;
         for (const change of changes) {
@@ -471,6 +538,16 @@ export function analyzeRestBreaking(options: {
           const id = stableId("rest", candidate);
           candidates.push({ id, ...candidate, contractChange: change });
         }
+      }
+      if (unresolvedOperations.length) {
+        blockers.push({
+          code: "autorest-contract-unresolved",
+          projectId: project.id,
+          message:
+            `Changed AutoRest contracts for ${unresolvedOperations.length} operations in ${project.id} ` +
+            `contain unresolved schema or parameter references (${unresolvedOperations.slice(0, 3).join(", ")}). ` +
+            "Their effective compatibility cannot be established from placeholder references.",
+        });
       }
       analyzedProjects += 1;
     } catch (error) {

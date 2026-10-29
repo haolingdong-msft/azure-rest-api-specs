@@ -32,8 +32,10 @@ type TestModelInput = ReturnType<typeof buildModelInput> & {
     budgetTier: string;
     omittedRedundant: {
       rawEmitterArtifacts: boolean;
+      restCandidateEvidenceFacts: boolean;
       sourceChanges: boolean;
     };
+    bytes: number;
     retained: {
       documentQualityReviewUnits?: unknown;
       documentQualityDocuments?: unknown;
@@ -286,7 +288,95 @@ void test("model input retains facts referenced by REST candidates", () => {
   assert.deepEqual(Object.keys(input.facts), ["rest-after", "rest-before"]);
 });
 
-void test("model input excludes API-version-wide intents and their candidates", () => {
+void test("model input omits duplicated REST operation facts for operation-heavy changes", () => {
+  const candidates = Array.from({ length: 41 }, (_, index) => ({
+    id: `rest-${index}`,
+    rule: "wire-schema-changed",
+    defaultSeverity: "high",
+    actual: `Operation-${index} response schema changed.`,
+    expected: `Operation-${index} response schema remains compatible.`,
+    operationIds: [`Operation-${index}`],
+    sourceChangeIds: ["source-1"],
+    hunkIds: ["hunk-1"],
+    declarationIds: [],
+    evidenceFactIds: [`rest-before-${index}`, `rest-after-${index}`],
+    reviewRequired: true as const,
+    contractChange: { rule: "wire-schema-changed", location: "responses.default" },
+  }));
+  const facts = Object.fromEntries(
+    candidates.flatMap((candidate, index) => [
+      [
+        candidate.evidenceFactIds[0],
+        { id: candidate.evidenceFactIds[0], schema: "before".repeat(1000), index },
+      ],
+      [
+        candidate.evidenceFactIds[1],
+        { id: candidate.evidenceFactIds[1], schema: "after".repeat(1000), index },
+      ],
+    ]),
+  );
+  const input = buildModelInputFromFixture({
+    manifest: {
+      comparison: {
+        mergeBaseCommit: "base",
+        headCommit: "head",
+        baseRef: "origin/main",
+        workingTree: {},
+      },
+      projects: [{ id: "p", path: "specification/widget" }],
+      blockers: [],
+    },
+    sourceIndex: {
+      sourceChanges: [
+        {
+          id: "source-1",
+          path: "a.tsp",
+          hunks: [{ id: "hunk-1", lines: ["+model Widget {}"] }],
+          declarations: [],
+        },
+      ],
+    },
+    semantic: {
+      status: "ready",
+      facts: {},
+      reviewUnits: [
+        {
+          id: "semantic-1",
+          sourceChangeIds: ["source-1"],
+          hunkIds: ["hunk-1"],
+          declarationIds: [],
+          operationIds: candidates.flatMap((candidate) => candidate.operationIds),
+          beforeFactIds: [],
+          afterFactIds: [],
+        },
+      ],
+      blockers: [],
+    },
+    rest: {
+      status: "ready",
+      facts,
+      candidates,
+      blockers: [],
+    },
+    downstream: {
+      status: "ready",
+      facts: {},
+      candidates: [],
+      blockers: [],
+    },
+  });
+
+  assert.deepEqual(Object.keys(input.facts), []);
+  assert.equal(input.inputAccounting.omittedRedundant.restCandidateEvidenceFacts, true);
+  assert.ok(input.inputAccounting.bytes <= 256 * 1024);
+  assert.equal(input.restCandidates.length, 41);
+  const firstEvidenceSetId = input.restCandidates[0].evidenceSetId;
+  assert.ok(firstEvidenceSetId);
+  const firstEvidenceSet = input.evidenceSets[firstEvidenceSetId];
+  assert.deepEqual(firstEvidenceSet.evidenceFactIds, []);
+});
+
+void test("model input excludes API-version-wide intents and their exclusive candidates", () => {
   const operations = ["Widgets_Get", "Widgets_List"].map((operationId, index) => ({
     operationId,
     beforeFactId: `before-${index}`,
@@ -335,6 +425,16 @@ void test("model input excludes API-version-wide intents and their candidates", 
           declarationIds: ["declaration-1"],
           declarationNames: ["Versions"],
           ownedOperationIds: [],
+          contextPolicy: {
+            schemaVersion: 1,
+            rest: { mode: "deterministic", reason: "verified-rest-carry-over" },
+            downstream: {
+              mode: "deterministic",
+              reason: "verified-downstream-carry-over",
+            },
+            guidelines: { mode: "not-applicable", reason: "informational-version-event" },
+            documentation: { mode: "deterministic", reason: "compiler-check" },
+          },
           operations,
         },
       ],
@@ -367,11 +467,16 @@ void test("model input excludes API-version-wide intents and their candidates", 
     },
   });
 
+  assert.equal(input.contextPolicyVersion, 2);
   assert.deepEqual(input.semanticReviewUnits, []);
   assert.deepEqual(input.informationalSemanticIntentIds, ["semantic-version-wide"]);
   assert.deepEqual(input.restCandidates, []);
   assert.deepEqual(input.downstreamCandidates, []);
-  assert.deepEqual(input.facts, {});
+  assert.deepEqual(Object.keys(input.facts), []);
+  assert.deepEqual(input.candidateOwnership, {
+    rest: {},
+    downstream: {},
+  });
 });
 
 void test("documentation completeness is omitted from bounded Agent input", () => {
@@ -548,7 +653,73 @@ void test("model input requests inference only for unknown hunks", () => {
     sourceChangeId: "source-1",
     hunkId: "hunk-1",
   });
-  assert.deepEqual(input.inferenceRequests[0].allowedDimensions, ["rest", "downstream"]);
+  assert.deepEqual(input.inferenceRequests[0].allowedDimensions, ["downstream"]);
+});
+
+void test("inference dimensions narrow only proven SDK-only changes and preserve mixed or unknown scope", () => {
+  for (const [file, lines, dimensions] of [
+    ["tspconfig.yaml", ["+    experimental-split-models-by-visibility: true"], ["downstream"]],
+    [
+      "tspconfig.yaml",
+      [
+        "-    experimental-split-models-by-visibility: false",
+        "+    experimental-split-models-by-visibility: true # SDK model split",
+      ],
+      ["downstream"],
+    ],
+    [
+      "tspconfig.yaml",
+      ["+    experimental-split-models-by-visibility: true", "+    unknown-wire-option: true"],
+      ["rest", "downstream"],
+    ],
+    ["tspconfig.yaml", ["+    unknown-wire-option: true"], ["rest", "downstream"]],
+    ["client.tsp", ['+@@clientLocation(Widgets.get, Contoso, "go");'], ["downstream"]],
+    [
+      "client.tsp",
+      [
+        '+@@clientLocation(Widgets.get, Contoso, "go");',
+        "+model Request { requiredField: string; }",
+      ],
+      ["rest", "downstream"],
+    ],
+    ["main.tsp", ["+    experimental-split-models-by-visibility: true"], ["rest", "downstream"]],
+  ] as const) {
+    const input = buildModelInputFromFixture({
+      manifest: {
+        comparison: {
+          mergeBaseCommit: "base",
+          headCommit: "head",
+          baseRef: "main",
+          workingTree: {},
+        },
+        projects: [{ id: "p", path: "specification/widgets" }],
+        blockers: [],
+      },
+      sourceIndex: {
+        sourceChanges: [
+          { id: "source-1", path: file, hunks: [{ id: "hunk-1", lines }], declarations: [] },
+        ],
+      },
+      semantic: {
+        status: "ready",
+        facts: {},
+        reviewUnits: [
+          {
+            id: "semantic-1",
+            sourceChangeIds: ["source-1"],
+            hunkIds: ["hunk-1"],
+            declarationIds: [],
+            operations: [],
+          },
+        ],
+        blockers: [],
+      },
+      rest: { status: "ready", facts: {}, candidates: [], blockers: [] },
+      downstream: { status: "ready", facts: {}, candidates: [], blockers: [] },
+    });
+    assert.equal(input.inferenceRequests.length, 1, `${file}: ${lines.join("\n")}`);
+    assert.deepEqual(input.inferenceRequests[0].allowedDimensions, [...dimensions]);
+  }
 });
 
 void test("model input bounds repeated review evidence and retains downstream facts", () => {
@@ -654,6 +825,7 @@ void test("model input retains downstream method and bridge path facts", () => {
         factKind: name === "method" ? "method" : "model",
         identity: `Contoso.${name}`,
         crossLanguageDefinitionId: `Contoso.${name}`,
+        ...(name === "method" ? { operation: { verb: "get", path: "/widgets" } } : {}),
       },
     ]),
   );
@@ -668,8 +840,53 @@ void test("model input retains downstream method and bridge path facts", () => {
       projects: [{ id: "p", path: "specification/widget" }],
       blockers: [],
     },
-    sourceIndex: { sourceChanges: [] },
-    semantic: { status: "ready", facts: {}, reviewUnits: [], blockers: [] },
+    sourceIndex: {
+      sourceChanges: [
+        {
+          id: "source-1",
+          path: "models.tsp",
+          hunks: [{ id: "hunk-1", lines: ["-old?: string;", "+current?: string;"] }],
+          declarations: [
+            {
+              id: "declaration-1",
+              kind: "model",
+              qualifiedName: "Contoso.type",
+              hunkIds: ["hunk-1"],
+            },
+          ],
+        },
+      ],
+    },
+    semantic: {
+      status: "ready",
+      facts: {
+        "operation-1": {
+          id: "operation-1",
+          projectId: "p",
+          operationId: "Widgets_Get",
+          method: "get",
+          path: "/widgets",
+        },
+      },
+      reviewUnits: [
+        {
+          id: "semantic-1",
+          projectId: "p",
+          sourceChangeIds: ["source-1"],
+          hunkIds: ["hunk-1"],
+          declarationIds: ["declaration-1"],
+          operations: [
+            {
+              operationId: "Widgets_Get",
+              afterFactId: "operation-1",
+              hunkIds: ["hunk-1"],
+              declarationIds: ["declaration-1"],
+            },
+          ],
+        },
+      ],
+      blockers: [],
+    },
     rest: { status: "ready", facts: {}, candidates: [], blockers: [] },
     downstream: {
       status: "ready",
@@ -718,6 +935,9 @@ void test("model input retains downstream method and bridge path facts", () => {
   });
 
   assert.deepEqual(Object.keys(input.facts), ["sdk-method", "sdk-type", "sdk-wrapper"]);
+  assert.deepEqual(input.candidateOwnership.downstream, {
+    "downstream-1": ["semantic-1"],
+  });
   assert.ok(
     input.downstreamRootCauses[0].referenceEvidence.every((edge) => {
       assert.ok(edge.fromFactId);
@@ -725,6 +945,348 @@ void test("model input retains downstream method and bridge path facts", () => {
       return Boolean(input.facts[edge.fromFactId] && input.facts[edge.toFactId]);
     }),
   );
+});
+
+void test("root-cause fallback does not add owners to directly owned downstream candidates", () => {
+  const input = buildModelInputFromFixture({
+    manifest: {
+      comparison: {
+        mergeBaseCommit: "base",
+        headCommit: "head",
+        baseRef: "origin/main",
+        workingTree: {},
+      },
+      projects: [{ id: "p", path: "specification/widget" }],
+      blockers: [],
+    },
+    sourceIndex: {
+      sourceChanges: [
+        {
+          id: "source-direct",
+          path: "direct.tsp",
+          hunks: [{ id: "hunk-direct", lines: ["+required: string;"] }],
+          declarations: [
+            {
+              id: "declaration-direct",
+              kind: "model-property",
+              qualifiedName: "Contoso.Widget.required",
+              hunkIds: ["hunk-direct"],
+            },
+          ],
+        },
+        {
+          id: "source-operation",
+          path: "operations.tsp",
+          hunks: [{ id: "hunk-operation", lines: ["+op getWidget(): Widget;"] }],
+          declarations: [
+            {
+              id: "declaration-operation",
+              kind: "operation",
+              qualifiedName: "Contoso.Widgets.getWidget",
+              hunkIds: ["hunk-operation"],
+            },
+          ],
+        },
+      ],
+    },
+    semantic: {
+      status: "ready",
+      facts: {
+        "operation-1": {
+          id: "operation-1",
+          projectId: "p",
+          operationId: "Widgets_Get",
+          method: "get",
+          path: "/widgets/{widgetName}",
+        },
+      },
+      reviewUnits: [
+        {
+          id: "semantic-direct",
+          projectId: "p",
+          sourceChangeIds: ["source-direct"],
+          hunkIds: ["hunk-direct"],
+          declarationIds: ["declaration-direct"],
+          declarationNames: ["Contoso.Widget.required"],
+          operations: [],
+        },
+        {
+          id: "semantic-operation",
+          projectId: "p",
+          sourceChangeIds: ["source-operation"],
+          hunkIds: ["hunk-operation"],
+          declarationIds: ["declaration-operation"],
+          declarationNames: ["Contoso.Widgets.getWidget"],
+          operations: [
+            {
+              operationId: "Widgets_Get",
+              afterFactId: "operation-1",
+              hunkIds: ["hunk-operation"],
+              declarationIds: ["declaration-operation"],
+            },
+          ],
+        },
+      ],
+      blockers: [],
+    },
+    rest: { status: "ready", facts: {}, candidates: [], blockers: [] },
+    downstream: {
+      status: "ready",
+      facts: {
+        "sdk-method": {
+          id: "sdk-method",
+          projectId: "p",
+          factKind: "method",
+          operation: { verb: "get", path: "/widgets/{widgetName}" },
+        },
+      },
+      candidates: [
+        {
+          id: "downstream-direct",
+          rule: "model-property-became-required",
+          actual: "Required",
+          expected: "Optional",
+          sourceChangeIds: ["source-direct"],
+          hunkIds: ["hunk-direct"],
+          declarationIds: ["declaration-direct"],
+          evidenceFactIds: ["sdk-method"],
+          rootCauseIds: ["root-1"],
+          reviewRequired: true,
+        },
+      ],
+      rootCauses: [
+        {
+          id: "root-1",
+          kind: "type-contract-propagation",
+          directCandidateIds: ["downstream-direct"],
+          propagatedCandidateIds: [],
+          methodFactIds: ["sdk-method"],
+          typeFactIds: [],
+          referenceEvidence: [],
+        },
+      ],
+      blockers: [],
+    },
+  });
+
+  assert.deepEqual(input.candidateOwnership.downstream, {
+    "downstream-direct": ["semantic-direct"],
+  });
+});
+
+void test("prefers focused intents over API-version publication for candidate ownership", () => {
+  const contextPolicy = {
+    schemaVersion: 1,
+    rest: { mode: "deterministic", reason: "test" },
+    downstream: { mode: "deterministic", reason: "test" },
+    guidelines: { mode: "not-applicable", reason: "test" },
+    documentation: { mode: "deterministic", reason: "test" },
+  };
+  const input = buildModelInputFromFixture({
+    manifest: {
+      comparison: {
+        mergeBaseCommit: "base",
+        headCommit: "head",
+        baseRef: "origin/main",
+        workingTree: {},
+      },
+      projects: [{ id: "p", path: "specification/widget" }],
+      blockers: [],
+    },
+    sourceIndex: {
+      sourceChanges: [
+        {
+          id: "source-focused",
+          path: "focused.tsp",
+          hunks: [{ id: "hunk-focused", lines: ["+op start(): void;"] }],
+          declarations: [
+            {
+              id: "declaration-focused",
+              kind: "operation",
+              qualifiedName: "Widgets.start",
+              hunkIds: ["hunk-focused"],
+            },
+          ],
+        },
+        {
+          id: "source-publication",
+          path: "publication.tsp",
+          hunks: [{ id: "hunk-publication", lines: ["+@added(Versions.v2)"] }],
+          declarations: [
+            {
+              id: "declaration-publication",
+              kind: "operation",
+              qualifiedName: "Widgets.start",
+              hunkIds: ["hunk-publication"],
+            },
+          ],
+        },
+      ],
+    },
+    semantic: {
+      status: "ready",
+      facts: {},
+      reviewUnits: [
+        {
+          id: "semantic-focused",
+          projectId: "p",
+          intentType: "normal",
+          sourceChangeIds: ["source-focused"],
+          hunkIds: ["hunk-focused"],
+          declarationIds: ["declaration-focused"],
+          declarationNames: ["Widgets.start"],
+          operations: [],
+          contextPolicy: structuredClone(contextPolicy),
+        },
+        {
+          id: "semantic-publication",
+          projectId: "p",
+          intentType: "api-version-publication",
+          sourceChangeIds: ["source-publication"],
+          hunkIds: ["hunk-publication"],
+          declarationIds: ["declaration-publication"],
+          declarationNames: ["Widgets.start"],
+          operations: [],
+          contextPolicy: structuredClone(contextPolicy),
+        },
+      ],
+      blockers: [],
+    },
+    rest: { status: "ready", facts: {}, candidates: [], blockers: [] },
+    downstream: {
+      status: "ready",
+      facts: {},
+      candidates: [
+        {
+          id: "downstream-operation",
+          rule: "method-kind-changed",
+          actual: "basic",
+          expected: "lro",
+          sourceChangeIds: ["source-focused", "source-publication"],
+          hunkIds: ["hunk-focused", "hunk-publication"],
+          declarationIds: ["declaration-focused", "declaration-publication"],
+          evidenceFactIds: [],
+          reviewRequired: true,
+        },
+      ],
+      blockers: [],
+    },
+  });
+
+  assert.deepEqual(input.candidateOwnership.downstream, {
+    "downstream-operation": ["semantic-focused"],
+  });
+  assert.deepEqual(input.informationalSemanticIntentIds, ["semantic-publication"]);
+  assert.deepEqual(
+    input.semanticReviewUnits.map((unit) => unit.reviewUnitId),
+    ["semantic-focused"],
+  );
+});
+
+void test("prefers candidate identity matches over a smaller unrelated semantic scope", () => {
+  const contextPolicy = {
+    schemaVersion: 1,
+    rest: { mode: "agent", reason: "test" },
+    downstream: { mode: "agent", reason: "test" },
+    guidelines: { mode: "agent", reason: "test" },
+    documentation: { mode: "deterministic", reason: "test" },
+  };
+  const input = buildModelInputFromFixture({
+    manifest: {
+      comparison: {
+        mergeBaseCommit: "base",
+        headCommit: "head",
+        baseRef: "origin/main",
+        workingTree: {},
+      },
+      projects: [{ id: "p", path: "specification/widget" }],
+      blockers: [],
+    },
+    sourceIndex: {
+      sourceChanges: [
+        {
+          id: "source-operation",
+          path: "FirewallPolicy.tsp",
+          hunks: [
+            { id: "hunk-import", lines: ["+using TypeSpec.Versioning;"] },
+            { id: "hunk-parameter", lines: ["+afcManagedSync?: boolean;"] },
+          ],
+          declarations: [
+            {
+              id: "declaration-operation",
+              kind: "operation",
+              qualifiedName: "FirewallPolicies.createOrUpdate",
+              hunkIds: ["hunk-parameter"],
+            },
+          ],
+        },
+        {
+          id: "source-unrelated",
+          path: "FirewallPolicyKubeSelectorGroup.tsp",
+          hunks: [{ id: "hunk-unrelated", lines: ["+model KubeSelectorGroup {}"] }],
+          declarations: [
+            {
+              id: "declaration-unrelated",
+              kind: "model",
+              qualifiedName: "FirewallPolicyKubeSelectorGroup",
+              hunkIds: ["hunk-unrelated"],
+            },
+          ],
+        },
+      ],
+    },
+    semantic: {
+      status: "ready",
+      facts: {},
+      reviewUnits: [
+        {
+          id: "semantic-operation",
+          projectId: "p",
+          sourceChangeIds: ["source-operation"],
+          hunkIds: ["hunk-import", "hunk-parameter"],
+          declarationIds: ["declaration-operation"],
+          declarationNames: ["FirewallPolicies.createOrUpdate"],
+          operations: [],
+          contextPolicy: structuredClone(contextPolicy),
+        },
+        {
+          id: "semantic-unrelated",
+          projectId: "p",
+          sourceChangeIds: ["source-unrelated"],
+          hunkIds: ["hunk-unrelated"],
+          declarationIds: ["declaration-unrelated"],
+          declarationNames: ["FirewallPolicyKubeSelectorGroup"],
+          operations: [],
+          contextPolicy: structuredClone(contextPolicy),
+        },
+      ],
+      blockers: [],
+    },
+    rest: { status: "ready", facts: {}, candidates: [], blockers: [] },
+    downstream: {
+      status: "ready",
+      facts: {},
+      candidates: [
+        {
+          id: "downstream-firewall",
+          rule: "method-parameters-changed",
+          actual: "Changed",
+          expected: "Stable",
+          crossLanguageDefinitionId: "Microsoft.Network.FirewallPolicies.createOrUpdate",
+          sourceChangeIds: ["source-operation", "source-unrelated"],
+          hunkIds: ["hunk-parameter", "hunk-unrelated"],
+          declarationIds: ["declaration-operation", "declaration-unrelated"],
+          evidenceFactIds: [],
+          reviewRequired: true,
+        },
+      ],
+      blockers: [],
+    },
+  });
+
+  assert.deepEqual(input.candidateOwnership.downstream, {
+    "downstream-firewall": ["semantic-operation"],
+  });
 });
 
 void test("model input keeps unsupported unmapped decorators unknown", () => {

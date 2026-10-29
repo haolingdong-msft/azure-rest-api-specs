@@ -846,6 +846,9 @@ void test("renderer labels active Azure Guidelines and scoped safety", () => {
   assert.match(html, /Documentation Completeness/);
   assert.match(html, /class="eyebrow">TypeSpec Assessment/);
   assert.match(html, /class="summary-grid"/);
+  assert.match(html, /Cross-version REST scope:/);
+  assert.match(html, /2025-07-01 to 2025-09-01/);
+  assert.match(html, /does not prove that its previously published contract was preserved/);
   assert.match(html, /<a class="summary-card" href="#rest-breaking">/);
   assert.match(html, /<a class="summary-card" href="#semantic-intents">/);
   assert.match(html, /<a class="summary-card" href="#downstream-breaking">/);

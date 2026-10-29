@@ -17,7 +17,8 @@ const [
   { stableId },
   { resolveAssessmentInput },
   { buildAgentWorkspace },
-  { partitionSemanticIntents },
+  { isInformationalIntent, partitionSemanticIntents },
+  { applySemanticContextPolicy },
   { transitionWorkflowState },
 ] = await Promise.all([
   import("./cli.ts"),
@@ -33,6 +34,7 @@ const [
   import("./assessment-input.ts"),
   import("./build-agent-workspace.ts"),
   import("./semantic-assessment-scope.ts"),
+  import("./semantic-context-policy.ts"),
   import("./workflow-state.ts"),
 ]);
 
@@ -103,12 +105,14 @@ type InputAccounting = {
 };
 type AnalysisModelInput = {
   schemaVersion: number;
+  contextPolicyVersion: number;
   context: Record<string, unknown>;
   artifactReferences: AssessmentModelInput["artifactReferences"];
   evidenceSets: Record<string, import("./runtime-types.ts").EvidenceSet & Record<string, unknown>>;
   facts: Record<string, unknown>;
   semanticReviewUnits: AssessmentModelInput["semanticReviewUnits"];
   informationalSemanticIntentIds: string[];
+  candidateOwnership: NonNullable<AssessmentModelInput["candidateOwnership"]>;
   restCandidates: AssessmentModelInput["restCandidates"];
   downstreamCandidates: AssessmentModelInput["downstreamCandidates"];
   downstreamRootCauses: import("./runtime-types.ts").DownstreamRootCause[];
@@ -155,6 +159,7 @@ const ARTIFACT_REFERENCES = {
 const QUALIFIED_NAME_LIMIT = 24;
 const CHANGED_CONSTRUCT_LIMIT = 40;
 const QUERY_TERM_LIMIT = 40;
+const REST_INLINE_FACT_CANDIDATE_LIMIT = 40;
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
@@ -563,9 +568,24 @@ function compactSemanticReviewUnit(
     ]),
     CHANGED_CONSTRUCT_LIMIT,
   );
+  const changeFacts = unit.changeFacts ?? [];
+  const changeFactNames = bounded(
+    changeFacts.map((fact) => fact.qualifiedName),
+    QUALIFIED_NAME_LIMIT,
+  );
+  const changeFacets = bounded(
+    changeFacts.flatMap((fact) => fact.facets),
+    CHANGED_CONSTRUCT_LIMIT,
+  );
   return {
     reviewUnitId: unit.id,
     intentType: unit.intentType ?? "normal",
+    classificationVersion: unit.classificationVersion ?? 1,
+    changeTypes: unit.changeTypes ?? [],
+    changeActions: [...new Set(changeFacts.map((fact) => fact.action))].sort(),
+    changeFactNames: changeFactNames.values,
+    changeFactCount: changeFacts.length,
+    changeFacets: changeFacets.values,
     action: unit.action ?? unit.changeKind ?? "modify",
     declarationKinds: [...new Set(declarations.map((item) => item.kind).filter(Boolean))].sort(),
     qualifiedNames: qualifiedNames.values,
@@ -576,6 +596,15 @@ function compactSemanticReviewUnit(
     affectedOperationCount: operations.length,
     representativeOperationIds: operations.slice(0, 3).map((item) => item.operationId),
     restChangedOperationCount: operations.filter((item) => item.restChanged).length,
+    carryOver: unit.carryOverProof
+      ? {
+          status: unit.carryOverProof.status,
+          equivalentOperationCount: unit.carryOverProof.equivalentOperationIds.length,
+          differentOperationCount: unit.carryOverProof.differentOperationIds.length,
+          unknownOperationCount: unit.carryOverProof.unknownOperationIds.length,
+        }
+      : undefined,
+    contextPolicy: unit.contextPolicy,
     groupingSummaries: (unit.groupingEvidence?.edges ?? [])
       .map((item) => item.summary)
       .filter(Boolean)
@@ -961,13 +990,27 @@ function normalizedSymbolNames(value: string | undefined) {
 }
 
 function candidateHunks(
-  _unit: InternalSemanticUnit,
+  unit: InternalSemanticUnit,
   candidate: AssessmentCandidate,
   facts: Record<string, AssessmentFact>,
   declarationsByHunk: Map<string, SourceDeclaration[]>,
   operationsByHunk: Map<string, InternalSemanticOperation[]>,
 ) {
   const matched: Set<string> = new Set();
+  const unitHunkIds = new Set(unit.hunkIds ?? []);
+  for (const hunkId of candidate.hunkIds ?? []) {
+    if (unitHunkIds.has(hunkId)) matched.add(hunkId);
+  }
+
+  const candidateDeclarationIds = new Set(candidate.declarationIds ?? []);
+  if (candidateDeclarationIds.size) {
+    for (const [hunkId, declarations] of declarationsByHunk) {
+      if (declarations.some((declaration) => candidateDeclarationIds.has(declaration.id))) {
+        matched.add(hunkId);
+      }
+    }
+  }
+
   const candidateOperations = new Set(candidate.operationIds ?? []);
   for (const [hunkId, operations] of operationsByHunk) {
     if (operations.some((operation) => candidateOperations.has(operation.operationId))) {
@@ -1086,8 +1129,8 @@ function deterministicCoverage({
         hunkId,
         status: "unknown",
         reason: gapReason,
-        restCandidateIds: [],
-        downstreamCandidateIds: [],
+        restCandidateIds,
+        downstreamCandidateIds,
       };
     }
     if (restCandidateIds.length || downstreamCandidateIds.length) {
@@ -1181,6 +1224,229 @@ function deterministicCoverage({
   };
 }
 
+function operationRouteKey(fact: AssessmentFact | undefined) {
+  const method = fact?.method ?? fact?.operation?.method ?? fact?.operation?.verb;
+  const route = fact?.path ?? fact?.operation?.path;
+  return method && route ? `${method.toLowerCase()} ${route}` : undefined;
+}
+
+function downstreamEvidenceOwners({
+  semanticUnits,
+  semanticFacts,
+  downstream,
+}: {
+  semanticUnits: InternalSemanticUnit[];
+  semanticFacts: Record<string, AssessmentFact>;
+  downstream: DownstreamAnalysis;
+}) {
+  const rootCauses = new Map((downstream.rootCauses ?? []).map((item) => [item.id, item]));
+  const result = new Map<string, { reviewUnitId: string; hunkIds: string[] }[]>();
+
+  for (const candidate of downstream.status === "ready" ? downstream.candidates : []) {
+    const methodFactIds = new Set(
+      (candidate.rootCauseIds ?? [])
+        .flatMap((id) => rootCauses.get(id)?.methodFactIds ?? [])
+        .concat(
+          (candidate.evidenceFactIds ?? []).filter(
+            (id) => downstream.facts[id]?.factKind === "method",
+          ),
+        ),
+    );
+    const methodFacts = [...methodFactIds]
+      .map((id) => downstream.facts[id])
+      .filter((fact): fact is AssessmentFact => Boolean(fact));
+    const routeKeys = new Set(
+      methodFacts.map(operationRouteKey).filter((key): key is string => Boolean(key)),
+    );
+    const methodIdentities = new Set(
+      methodFacts.flatMap((fact) =>
+        [fact.identity, fact.crossLanguageDefinitionId].filter((value): value is string =>
+          Boolean(value),
+        ),
+      ),
+    );
+    const candidateIdentity = candidate.crossLanguageDefinitionId;
+    const owners: { reviewUnitId: string; hunkIds: string[] }[] = [];
+
+    for (const unit of semanticUnits) {
+      if (
+        methodFacts.some(
+          (fact) => fact.projectId && unit.projectId && fact.projectId !== unit.projectId,
+        )
+      ) {
+        continue;
+      }
+      const matchedOperations = (unit.operations ?? []).filter((operation) => {
+        const facts = [operation.beforeFactId, operation.afterFactId]
+          .map((id) => (id ? semanticFacts[id] : undefined))
+          .filter((fact): fact is AssessmentFact => Boolean(fact));
+        if (facts.some((fact) => routeKeys.has(operationRouteKey(fact) ?? ""))) return true;
+        return facts.some((fact) =>
+          [fact.identity, fact.crossLanguageDefinitionId, fact.operationId].some(
+            (identity) => identity && methodIdentities.has(identity),
+          ),
+        );
+      });
+      const declarationMatch =
+        candidateIdentity &&
+        unit.declarationNames.some(
+          (name) =>
+            candidateIdentity === name ||
+            candidateIdentity.endsWith(`.${name}`) ||
+            name.endsWith(`.${candidateIdentity}`),
+        );
+      if (!matchedOperations.length && !declarationMatch) continue;
+      owners.push({
+        reviewUnitId: unit.id,
+        hunkIds: [
+          ...new Set(
+            matchedOperations.length
+              ? matchedOperations.flatMap((operation) => operation.hunkIds ?? [])
+              : unit.hunkIds,
+          ),
+        ].sort(),
+      });
+    }
+    if (owners.length) result.set(candidate.id, owners);
+  }
+  return result;
+}
+
+function attachDownstreamEvidenceOwnership({
+  coverages,
+  owners,
+}: {
+  coverages: Map<string, DeterministicCoverage>;
+  owners: Map<string, { reviewUnitId: string; hunkIds: string[] }[]>;
+}) {
+  const directlyOwnedCandidateIds = new Set(
+    [...coverages.values()].flatMap((coverage) => coverage.downstreamCandidateIds),
+  );
+  for (const [candidateId, candidateOwners] of owners) {
+    if (directlyOwnedCandidateIds.has(candidateId)) continue;
+    for (const owner of candidateOwners) {
+      const coverage = coverages.get(owner.reviewUnitId);
+      if (!coverage) continue;
+      coverage.downstreamCandidateIds = [
+        ...new Set([...coverage.downstreamCandidateIds, candidateId]),
+      ].sort();
+      const hunkIds = new Set(owner.hunkIds);
+      for (const classification of coverage.classifications) {
+        if (!hunkIds.has(classification.hunkId)) continue;
+        classification.downstreamCandidateIds = [
+          ...new Set([...classification.downstreamCandidateIds, candidateId]),
+        ].sort();
+        if (classification.status === "no-impact") {
+          classification.status = "candidate-generated";
+          classification.reason = "mapped-downstream-root-cause";
+        }
+      }
+    }
+  }
+}
+
+function reconcileCandidateOwnership(
+  semanticUnits: InternalSemanticUnit[],
+  coverages: Map<string, DeterministicCoverage>,
+  rest: BreakingAnalysis,
+  downstream: DownstreamAnalysis,
+) {
+  const unitById = new Map(semanticUnits.map((unit) => [unit.id, unit]));
+  for (const dimension of ["rest", "downstream"] as const) {
+    const field = dimension === "rest" ? "restCandidateIds" : "downstreamCandidateIds";
+    const candidates = new Map(
+      (dimension === "rest"
+        ? rest.status === "ready"
+          ? rest.candidates
+          : []
+        : downstream.status === "ready"
+          ? downstream.candidates
+          : []
+      ).map((candidate) => [candidate.id, candidate]),
+    );
+    const ownersByCandidate = new Map<string, string[]>();
+    for (const [reviewUnitId, coverage] of coverages) {
+      for (const candidateId of coverage[field]) {
+        const owners = ownersByCandidate.get(candidateId) ?? [];
+        owners.push(reviewUnitId);
+        ownersByCandidate.set(candidateId, owners);
+      }
+    }
+    for (const [candidateId, ownerIds] of ownersByCandidate) {
+      if (ownerIds.length < 2) continue;
+      const candidate = candidates.get(candidateId);
+      const candidateIdentity =
+        "crossLanguageDefinitionId" in (candidate ?? {})
+          ? candidate?.crossLanguageDefinitionId
+          : undefined;
+      const ownerId = [...ownerIds].sort((leftId, rightId) => {
+        const left = requireMapValue(unitById, leftId, "Semantic review unit");
+        const right = requireMapValue(unitById, rightId, "Semantic review unit");
+        const identityMatches = (unit: InternalSemanticUnit) =>
+          candidateIdentity
+            ? unit.declarationNames.some(
+                (name) =>
+                  name === candidateIdentity ||
+                  candidateIdentity.endsWith(`.${name}`) ||
+                  name.endsWith(`.${candidateIdentity}`),
+              )
+            : false;
+        const leftIdentityMatch = identityMatches(left);
+        const rightIdentityMatch = identityMatches(right);
+        if (leftIdentityMatch !== rightIdentityMatch) return leftIdentityMatch ? -1 : 1;
+        const leftInformational =
+          left.intentType === "api-version-publication" ||
+          left.intentType === "api-version-wide-change";
+        const rightInformational =
+          right.intentType === "api-version-publication" ||
+          right.intentType === "api-version-wide-change";
+        if (leftInformational !== rightInformational) return leftInformational ? 1 : -1;
+        if (left.hunkIds.length !== right.hunkIds.length) {
+          return left.hunkIds.length - right.hunkIds.length;
+        }
+        return left.id.localeCompare(right.id);
+      })[0];
+      for (const losingId of ownerIds.filter((id) => id !== ownerId)) {
+        const coverage = requireMapValue(coverages, losingId, "Deterministic coverage");
+        coverage[field] = coverage[field].filter((id) => id !== candidateId);
+        for (const classification of coverage.classifications) {
+          classification[field] = classification[field].filter((id) => id !== candidateId);
+          if (
+            classification.status === "candidate-generated" &&
+            classification.restCandidateIds.length === 0 &&
+            classification.downstreamCandidateIds.length === 0
+          ) {
+            classification.status = "no-impact";
+            classification.reason = "candidate-owned-by-more-specific-semantic-intent";
+          }
+        }
+      }
+    }
+  }
+}
+
+function inferenceDimensions(
+  source: SourceChange,
+  hunkId: string,
+): InferenceRequest["allowedDimensions"] {
+  const changedLines = (source.hunks.find((hunk) => hunk.id === hunkId)?.lines ?? [])
+    .filter((line) => line.startsWith("+") || line.startsWith("-"))
+    .map((line) => line.slice(1).trim())
+    .filter(Boolean);
+  const sdkConfigurationOnly =
+    path.basename(source.path) === "tspconfig.yaml" &&
+    changedLines.length > 0 &&
+    changedLines.every((line) =>
+      /^experimental-split-models-by-visibility:\s*(?:true|false)\s*(?:#.*)?$/.test(line),
+    );
+  const sdkDecoratorOnly = decoratorOnlyChange(
+    source,
+    hunkId,
+    new Set(["@@clientLocation", "@@clientName", "@@Azure.ClientGenerator.Core.clientName"]),
+  );
+  return sdkConfigurationOnly || sdkDecoratorOnly ? ["downstream"] : ["rest", "downstream"];
+}
+
 function buildInferenceRequests(
   semanticUnits: InternalSemanticUnit[],
   sourceChanges: Record<string, SourceChange>,
@@ -1203,7 +1469,7 @@ function buildInferenceRequests(
           .filter((operation) => operation.hunkIds?.includes(hunkId))
           .map((operation) => operation.operationId)
           .sort(),
-        allowedDimensions: ["rest", "downstream"] as InferenceRequest["allowedDimensions"],
+        allowedDimensions: inferenceDimensions(source, hunkId),
       };
       return {
         requestId: stableId("inference-request", request),
@@ -1218,7 +1484,7 @@ function buildInferenceRequests(
   });
 }
 
-function compactSources(
+export function compactSources(
   sourceIndex: SourceIndex,
   semantic: SemanticAnalysis,
   rest: BreakingAnalysis,
@@ -1283,6 +1549,7 @@ function accountInput(
         unchangedInventories: true,
         unreferencedFacts: true,
         unreferencedDeterministicFacts: true,
+        restCandidateEvidenceFacts: input.restCandidates.length > REST_INLINE_FACT_CANDIDATE_LIMIT,
         sourceChanges: true,
         repeatedDeclarationIds: true,
         repeatedReviewUnitEvidence: true,
@@ -1321,43 +1588,79 @@ export function buildModelInput({
   maximumBytes?: number;
 }): AnalysisModelInput {
   const semanticUnits = semantic.status === "ready" ? semantic.reviewUnits : [];
+  const sourceChanges = compactSources(sourceIndex, semantic, rest, downstream);
+  const allCoverages = new Map(
+    semanticUnits.map((unit) => [
+      unit.id,
+      deterministicCoverage({
+        unit,
+        sourceChanges,
+        semantic,
+        rest,
+        downstream,
+      }),
+    ]),
+  );
+  attachDownstreamEvidenceOwnership({
+    coverages: allCoverages,
+    owners: downstreamEvidenceOwners({
+      semanticUnits,
+      semanticFacts: semantic.facts,
+      downstream,
+    }),
+  });
+  reconcileCandidateOwnership(semanticUnits, allCoverages, rest, downstream);
+  for (const unit of semanticUnits) {
+    const coverage = requireMapValue(allCoverages, unit.id, "Deterministic coverage");
+    if (!unit.contextPolicy) continue;
+    if (
+      isInformationalIntent(unit) &&
+      (unit.intentType === "api-version-publication" ||
+        unit.intentType === "api-version-wide-change")
+    ) {
+      continue;
+    }
+    if (coverage.restCandidateIds.length || coverage.uncoveredHunkIds.length) {
+      unit.contextPolicy.rest = {
+        mode: "agent",
+        reason: coverage.restCandidateIds.length
+          ? "rest-candidates-require-judgment"
+          : "unresolved-source-coverage",
+        evidenceIds: coverage.restCandidateIds,
+      };
+    }
+    if (coverage.downstreamCandidateIds.length || coverage.uncoveredHunkIds.length) {
+      unit.contextPolicy.downstream = {
+        mode: "agent",
+        reason: coverage.downstreamCandidateIds.length
+          ? "downstream-candidates-require-judgment"
+          : "unresolved-source-coverage",
+        evidenceIds: coverage.downstreamCandidateIds,
+      };
+    }
+  }
   const { assessed: assessedSemanticUnits, informational: informationalSemanticUnits } =
     partitionSemanticIntents(semanticUnits);
-  const assessedSemantic = {
-    ...semantic,
-    reviewUnits: assessedSemanticUnits,
-  };
-  const sourceChanges = compactSources(sourceIndex, assessedSemantic, rest, downstream);
   const fullComplianceSearchRequests = buildComplianceSearchRequests({
     semanticReviewUnits: assessedSemanticUnits,
     sourceChanges,
+    semanticFacts: semantic.facts,
   });
   const complianceRequestsByUnit = new Map(
     fullComplianceSearchRequests.map((request) => [request.reviewUnitId, request]),
   );
   const coverages = new Map(
-    assessedSemanticUnits.map((unit) => [
-      unit.id,
-      deterministicCoverage({
-        unit,
-        sourceChanges,
-        semantic,
-        rest,
-        downstream,
-        complianceRequest: complianceRequestsByUnit.get(unit.id),
-      }),
-    ]),
+    assessedSemanticUnits.map((unit) => {
+      const coverage = requireMapValue(allCoverages, unit.id, "Deterministic coverage");
+      const complianceRequest = complianceRequestsByUnit.get(unit.id);
+      coverage.complianceSearchRequestIds = complianceRequest ? [complianceRequest.requestId] : [];
+      return [unit.id, coverage] as const;
+    }),
   );
   const informationalCoverages = new Map(
     informationalSemanticUnits.map((unit) => [
       unit.id,
-      deterministicCoverage({
-        unit,
-        sourceChanges,
-        semantic,
-        rest,
-        downstream,
-      }),
+      requireMapValue(allCoverages, unit.id, "Deterministic coverage"),
     ]),
   );
   const retainedRestCandidateIds = new Set(
@@ -1421,13 +1724,21 @@ export function buildModelInput({
     downstream,
     coverages,
   });
+  const inlineRestCandidateFacts =
+    retainedRestCandidates.length <= REST_INLINE_FACT_CANDIDATE_LIMIT;
   const retainedFactIds = new Set([
     ...retainedInferenceFactIds,
-    ...retainedRestCandidates.flatMap((candidate) => candidate.evidenceFactIds ?? []),
+    ...(inlineRestCandidateFacts
+      ? retainedRestCandidates.flatMap((candidate) => candidate.evidenceFactIds ?? [])
+      : []),
     ...downstreamReferencedFactIds(retainedDownstream),
   ]);
 
-  const compactCandidate = (candidate: AssessmentCandidate, artifact: string) => {
+  const compactCandidate = (
+    candidate: AssessmentCandidate,
+    artifact: string,
+    includeEvidenceFacts: boolean,
+  ) => {
     const { sourceChangeIds, hunkIds, declarationIds, ...judgmentInput } = candidate;
     return {
       ...judgmentInput,
@@ -1437,7 +1748,7 @@ export function buildModelInput({
           sourceChangeIds,
           hunkIds,
           declarationIds,
-          evidenceFactIds: candidate.evidenceFactIds,
+          evidenceFactIds: includeEvidenceFacts ? candidate.evidenceFactIds : [],
         },
         artifact,
         candidate.id,
@@ -1470,8 +1781,35 @@ export function buildModelInput({
     querySummary: compactQuerySummary(request.queryProfile),
   }));
 
+  const ownershipFor = (dimension: "rest" | "downstream") => {
+    const result: Record<string, string[]> = {};
+    for (const [reviewUnitId, coverage] of coverages) {
+      const candidateIds =
+        dimension === "rest" ? coverage.restCandidateIds : coverage.downstreamCandidateIds;
+      for (const candidateId of candidateIds) {
+        const owners = result[candidateId] ?? [];
+        owners.push(reviewUnitId);
+        result[candidateId] = [...new Set(owners)].sort();
+      }
+    }
+    return result;
+  };
+  const restOwnership = ownershipFor("rest");
+  const downstreamOwnership = ownershipFor("downstream");
+  for (const candidate of retainedRestCandidates) {
+    if (!restOwnership[candidate.id]?.length) {
+      throw new Error(`REST candidate ${candidate.id} has no source-owned Semantic intent.`);
+    }
+  }
+  for (const candidate of retainedDownstreamCandidates) {
+    if (!downstreamOwnership[candidate.id]?.length) {
+      throw new Error(`Downstream candidate ${candidate.id} has no source-owned Semantic intent.`);
+    }
+  }
+
   const input: AnalysisModelInput = {
     schemaVersion: 1,
+    contextPolicyVersion: 2,
     context: {
       sourceComparison: {
         baseCommit: manifest.comparison.mergeBaseCommit,
@@ -1506,16 +1844,24 @@ export function buildModelInput({
     facts: referencedFacts(semantic, rest, downstream, retainedFactIds),
     semanticReviewUnits,
     informationalSemanticIntentIds: informationalSemanticUnits.map((unit) => unit.id),
+    candidateOwnership: {
+      rest: restOwnership,
+      downstream: downstreamOwnership,
+    },
     restCandidates:
       rest.status === "ready"
         ? retainedRestCandidates.map((candidate) =>
-            compactCandidate(candidate, ARTIFACT_REFERENCES.restCandidates),
+            compactCandidate(
+              candidate,
+              ARTIFACT_REFERENCES.restCandidates,
+              inlineRestCandidateFacts,
+            ),
           )
         : [],
     downstreamCandidates:
       downstream.status === "ready"
         ? retainedDownstreamCandidates.map((candidate) =>
-            compactCandidate(candidate, ARTIFACT_REFERENCES.downstreamCandidates),
+            compactCandidate(candidate, ARTIFACT_REFERENCES.downstreamCandidates, true),
           )
         : [],
     downstreamRootCauses: downstream.status === "ready" ? retainedDownstreamRootCauses : [],
@@ -1714,6 +2060,10 @@ export async function runAssessmentAnalysis(options: AssessmentAnalysisOptions) 
       output: path.join(output, "dimensions", "downstream-breaking-input.json"),
     }),
   );
+  runDimension("semanticContextPolicyMs", () => {
+    applySemanticContextPolicy({ manifest, workRoot: output, semantic });
+    writeJson(path.join(output, "dimensions", "semantic-intents-input.json"), semantic);
+  });
   const documentQuality = runDimension("documentQualityAnalysisMs", () =>
     buildDocumentQualityInput({
       sourceIndex,
@@ -1762,6 +2112,7 @@ export async function runAssessmentAnalysis(options: AssessmentAnalysisOptions) 
     downstream,
     maximumBytes: configuredMaximum,
   });
+  writeJson(path.join(output, "dimensions", "semantic-intents-input.json"), semantic);
   writeJson(path.join(output, "dimensions", "compliance-search-requests.json"), {
     schemaVersion: 1,
     requests: buildComplianceSearchRequests({
@@ -1779,6 +2130,7 @@ export async function runAssessmentAnalysis(options: AssessmentAnalysisOptions) 
         rest,
         downstream,
       ),
+      semanticFacts: semantic.facts,
     }),
   });
   writeJson(path.join(output, "model-input.json"), modelInput);

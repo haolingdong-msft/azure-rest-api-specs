@@ -254,6 +254,68 @@ void test("builds a bounded Azure Guidelines query profile from Semantic intent 
   assert.equal(requests[0].queryProfile.affectedOperationCount, 0);
 });
 
+void test("identifies ARM projects from operation routes when the project path is plane-neutral", () => {
+  const source: SourceChange = {
+    id: "source-1",
+    path: "specification/widgets/Contoso.Widgets/main.tsp",
+    status: "modified",
+    origins: [],
+    hunks: [
+      {
+        id: "hunk-1",
+        base: { startLine: 10, endLine: 10 },
+        current: { startLine: 10, endLine: 10 },
+        lines: ["+@added(Versions.v2)"],
+      },
+    ],
+    declarations: [
+      {
+        id: "declaration-1",
+        kind: "enum",
+        qualifiedName: "Contoso.Widgets.Versions",
+        decorators: ["@added"],
+        versionedMembers: [],
+        hunkIds: ["hunk-1"],
+        source: {
+          revision: "current",
+          startLine: 10,
+          endLine: 10,
+          link: "https://example.test/main.tsp#L10",
+        },
+      },
+    ],
+  };
+  const requests = buildComplianceSearchRequests({
+    semanticReviewUnits: [
+      {
+        id: "semantic-operation",
+        projectId: "project-1",
+        sourceChangeIds: ["source-1"],
+        hunkIds: ["hunk-1"],
+        operations: [{ operationId: "Widgets_Get", afterFactId: "operation-1" }],
+      },
+      {
+        id: "semantic-versioning",
+        projectId: "project-1",
+        sourceChangeIds: ["source-1"],
+        hunkIds: ["hunk-1"],
+      },
+    ],
+    sourceChanges: { "source-1": source },
+    semanticFacts: {
+      "operation-1": {
+        id: "operation-1",
+        path: "/subscriptions/{subscriptionId}/providers/Microsoft.Contoso/widgets/{widgetName}",
+      },
+    },
+  });
+
+  assert.deepEqual(
+    requests.map((request) => request.queryProfile.servicePlane),
+    ["resource-manager", "resource-manager"],
+  );
+});
+
 void test("assembles one Azure Guidelines finding and coverage per Semantic intent", () => {
   const { source, requests, evidence, decisions } = fixture();
   const compliance = assembleCompliance({

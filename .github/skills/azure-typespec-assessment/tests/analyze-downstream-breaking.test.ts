@@ -493,7 +493,22 @@ void test("links nested response type changes to unchanged public methods", (con
   );
   assert.ok(root);
   assert.equal(root.kind, "type-contract-propagation");
-  assert.equal(root.methodFactIds.length, 1);
+  assert.equal(root.methodFactIds.length, 2);
+  assert.deepEqual(root.methodFactIds.map((id) => result.facts[id].comparisonRole).sort(), [
+    "baseline",
+    "target",
+  ]);
+  assert.deepEqual(
+    [
+      ...new Set(
+        root.referenceEvidence.map((edge) => {
+          assert.ok(edge.fromFactId);
+          return result.facts[edge.fromFactId].comparisonRole;
+        }),
+      ),
+    ].sort(),
+    ["baseline", "target"],
+  );
   assert.ok(
     root.referenceEvidence.some(
       (edge) => edge.kind === "response" && edge.location === "response-body",
@@ -514,4 +529,34 @@ void test("links nested response type changes to unchanged public methods", (con
         fact.crossLanguageDefinitionId === "Storage.File.Directory.listFilesAndDirectoriesSegment",
     ),
   );
+});
+
+void test("retains the unchanged baseline method and parent types for a target-only reference path", (context) => {
+  const baseline = nestedResponseShape(false);
+  baseline.models[0].properties = [];
+  const result = analyzeShapes(context, baseline, nestedResponseShape(true));
+  const candidate = result.candidates.find((item) => item.rule === "model-property-removed");
+  assert.ok(candidate);
+  const root = result.rootCauses.find((item) => item.directCandidateIds.includes(candidate.id));
+  assert.ok(root);
+  assert.deepEqual(root.methodFactIds.map((id) => result.facts[id].comparisonRole).sort(), [
+    "baseline",
+    "target",
+  ]);
+  assert.ok(
+    root.referenceEvidence.every(
+      (edge) => edge.fromFactId && result.facts[edge.fromFactId].comparisonRole === "target",
+    ),
+  );
+  assert.ok(
+    root.typeFactIds.some((id) => {
+      const fact = result.facts[id];
+      return (
+        fact.comparisonRole === "baseline" &&
+        fact.identity === "Storage.File.ListFilesAndDirectoriesSegmentResponse" &&
+        fact.properties?.length === 0
+      );
+    }),
+  );
+  assert.ok(!result.candidates.some((item) => item.rule.startsWith("method-")));
 });

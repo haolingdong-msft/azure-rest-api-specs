@@ -5,6 +5,8 @@ import path from "node:path";
 import {
   analyzeSemanticIntents,
   dedupePublicationHunks,
+  dedupeSemanticHunks,
+  isPublicationGroupingUnit,
 } from "../scripts/analyze-semantic-intents.ts";
 
 type InternalSemanticUnit = import("../scripts/runtime-types.ts").InternalSemanticUnit;
@@ -203,6 +205,12 @@ function dedupeFixture(units: unknown, sources: unknown) {
   assertInternalSemanticUnits(units);
   assertSourceChanges(sources);
   return dedupePublicationHunks(units, sources);
+}
+
+function partitionFixture(units: unknown, sources: unknown) {
+  assertInternalSemanticUnits(units);
+  assertSourceChanges(sources);
+  return dedupeSemanticHunks(units, sources);
 }
 
 function writeJson(file: string, value: unknown) {
@@ -596,14 +604,15 @@ void test("keeps API-version and project-specific method indexes separate", (con
   inputs.manifest.projects.push(otherProject);
   const result = analyzeFixture(inputs);
   assert.deepEqual(result.blockers, []);
-  const units = new Map(result.reviewUnits.map((unit) => [unit.projectId, unit]));
-  const projectUnit = units.get(project.id);
-  const otherUnit = units.get(otherProject.id);
-  assert.ok(projectUnit);
-  assert.ok(otherUnit);
-  assert.deepEqual(projectUnit.ownedOperationIds, ["OutboundRules_Post"]);
-  assert.deepEqual(otherUnit.ownedOperationIds, ["Other_Post"]);
-  assert.equal(result.facts[otherUnit.afterFactIds[0]].apiVersion, "v2");
+  assert.equal(result.reviewUnits.length, 1);
+  const [unit] = result.reviewUnits;
+  assert.ok(unit.projectIds);
+  assert.deepEqual([...unit.projectIds].sort(), [project.id, otherProject.id].sort());
+  assert.deepEqual(unit.ownedOperationIds.sort(), ["Other_Post", "OutboundRules_Post"]);
+  const otherOperation = unit.operations.find((operation) => operation.operationId === "Other_Post");
+  assert.ok(otherOperation);
+  assert.ok(otherOperation.afterFactId);
+  assert.equal(result.facts[otherOperation.afterFactId].apiVersion, "v2");
 });
 
 void test("selects only the requested REST version from a multi-version artifact", (context) => {
@@ -713,6 +722,293 @@ void test("keeps shared hunks only in their specific semantic unit", () => {
   assert.ok(result[0].groupingEvidence);
   assert.deepEqual(result[0].groupingEvidence.memberHunkIds, ["hunk-version"]);
   assert.deepEqual(result[1], units[1] as unknown as InternalSemanticUnit);
+});
+
+void test("recognizes current api-version publication intents when partitioning hunks", () => {
+  const units = [
+    {
+      id: "semantic-publication",
+      intentType: "api-version-publication",
+      sourceChangeIds: ["source"],
+      hunkIds: ["hunk-version", "hunk-model"],
+      declarationIds: ["declaration-version", "declaration-model"],
+      declarationNames: ["Versions", "Widget"],
+      operations: [],
+      operationIds: [],
+      ownedOperationIds: [],
+      beforeFactIds: [],
+      afterFactIds: [],
+      changedAspects: [],
+      groupingEvidence: { reasons: ["publication"] },
+    },
+    {
+      id: "semantic-model",
+      intentType: "normal",
+      sourceChangeIds: ["source"],
+      hunkIds: ["hunk-model"],
+      declarationIds: ["declaration-model"],
+      declarationNames: ["Widget"],
+      operations: [],
+      operationIds: [],
+      ownedOperationIds: [],
+      beforeFactIds: [],
+      afterFactIds: [],
+      changedAspects: [],
+    },
+  ];
+  const sources = [
+    {
+      id: "source",
+      hunks: [{ id: "hunk-version" }, { id: "hunk-model" }],
+      declarations: [
+        { id: "declaration-version", qualifiedName: "Versions", hunkIds: ["hunk-version"] },
+        { id: "declaration-model", qualifiedName: "Widget", hunkIds: ["hunk-model"] },
+      ],
+    },
+  ];
+
+  const result = dedupeFixture(units, sources);
+
+  assert.deepEqual(result[0].hunkIds, ["hunk-version"]);
+  assert.deepEqual(result[0].declarationIds, ["declaration-version"]);
+});
+
+void test("keeps directly owned changed operations out of publication grouping", () => {
+  const base = {
+    id: "semantic-versioning",
+    projectId: "project",
+    sourceChangeIds: ["source"],
+    hunkIds: ["hunk"],
+    declarationIds: ["declaration"],
+    declarationNames: ["Versions"],
+    operationIds: [],
+    beforeFactIds: [],
+    afterFactIds: [],
+    changedAspects: [],
+    changeTypes: ["versioning"],
+    changeFacts: [
+      {
+        id: "change",
+        sourceChangeId: "source",
+        hunkIds: ["hunk"],
+        declarationIds: ["declaration"],
+        beforeDeclarationIds: [],
+        afterDeclarationIds: ["declaration"],
+        changeType: "versioning",
+        action: "add",
+        facets: ["parameters"],
+        evidenceRef: {
+          artifact: "source/source-index.json",
+          sourceChangeId: "source",
+          hunkIds: ["hunk"],
+          declarationIds: ["declaration"],
+        },
+      },
+    ],
+  };
+  const changed = {
+    ...base,
+    ownedOperationIds: ["Widgets_CreateOrUpdate"],
+    operations: [
+      {
+        operationId: "Widgets_CreateOrUpdate",
+        beforeFactId: "before",
+        afterFactId: "after",
+        restChanged: true,
+        matchBasis: "operation-identity",
+        sourceChangeIds: ["source"],
+        hunkIds: ["hunk"],
+        declarationIds: ["declaration"],
+      },
+    ],
+  } as InternalSemanticUnit;
+  const publication = {
+    ...base,
+    ownedOperationIds: [],
+    operations: [
+      {
+        operationId: "Widgets_Get",
+        beforeFactId: "before",
+        afterFactId: "after",
+        restChanged: false,
+        matchBasis: "version-transition-change",
+        sourceChangeIds: ["source"],
+        hunkIds: ["hunk"],
+        declarationIds: ["declaration"],
+      },
+    ],
+  } as InternalSemanticUnit;
+
+  assert.equal(isPublicationGroupingUnit(changed), false);
+  assert.equal(isPublicationGroupingUnit(publication), true);
+});
+
+void test("assigns each non-publication hunk to its most specific semantic unit", () => {
+  const units = [
+    {
+      id: "semantic-customization-specific",
+      sourceChangeIds: ["source-client"],
+      hunkIds: ["hunk-client", "hunk-name"],
+      declarationIds: [],
+      declarationNames: [],
+      operations: [],
+      operationIds: [],
+      ownedOperationIds: [],
+      beforeFactIds: [],
+      afterFactIds: [],
+      changedAspects: [],
+      changeTypes: ["sdk-customization"],
+      changeFacts: [
+        {
+          id: "fact-client-specific",
+          sourceChangeId: "source-client",
+          hunkIds: ["hunk-client"],
+          declarationIds: [],
+          beforeDeclarationIds: [],
+          afterDeclarationIds: [],
+          changeType: "sdk-customization",
+          action: "modify",
+          facets: [],
+          evidenceRef: {
+            artifact: "source/source-index.json",
+            sourceChangeId: "source-client",
+            hunkIds: ["hunk-client"],
+            declarationIds: [],
+          },
+        },
+      ],
+      groupingEvidence: { reasons: ["sdk-compatibility", "transform:client-name"] },
+    },
+    {
+      id: "semantic-customization-generic",
+      sourceChangeIds: ["source-client"],
+      hunkIds: ["hunk-client"],
+      declarationIds: [],
+      declarationNames: [],
+      operations: [],
+      operationIds: [],
+      ownedOperationIds: [],
+      beforeFactIds: [],
+      afterFactIds: [],
+      changedAspects: [],
+      changeTypes: ["sdk-customization"],
+      changeFacts: [
+        {
+          id: "fact-client-generic",
+          sourceChangeId: "source-client",
+          hunkIds: ["hunk-client"],
+          declarationIds: [],
+          beforeDeclarationIds: [],
+          afterDeclarationIds: [],
+          changeType: "sdk-customization",
+          action: "modify",
+          facets: [],
+          evidenceRef: {
+            artifact: "source/source-index.json",
+            sourceChangeId: "source-client",
+            hunkIds: ["hunk-client"],
+            declarationIds: [],
+          },
+        },
+      ],
+    },
+    {
+      id: "semantic-mixed",
+      sourceChangeIds: ["source-model"],
+      hunkIds: ["hunk-doc", "hunk-version"],
+      declarationIds: ["declaration-doc", "declaration-version"],
+      declarationNames: ["Widget", "Versions"],
+      operations: [],
+      operationIds: [],
+      ownedOperationIds: [],
+      beforeFactIds: [],
+      afterFactIds: [],
+      changedAspects: [],
+      changeTypes: ["documentation", "versioning"],
+      changeFacts: [
+        {
+          id: "fact-doc-mixed",
+          sourceChangeId: "source-model",
+          hunkIds: ["hunk-doc"],
+          declarationIds: ["declaration-doc"],
+          beforeDeclarationIds: ["declaration-doc"],
+          afterDeclarationIds: ["declaration-doc"],
+          changeType: "documentation",
+          action: "modify",
+          facets: [],
+          evidenceRef: {
+            artifact: "source/source-index.json",
+            sourceChangeId: "source-model",
+            hunkIds: ["hunk-doc"],
+            declarationIds: ["declaration-doc"],
+          },
+        },
+      ],
+      groupingEvidence: { reasons: ["governance:api-version"] },
+    },
+    {
+      id: "semantic-documentation",
+      sourceChangeIds: ["source-model"],
+      hunkIds: ["hunk-doc"],
+      declarationIds: ["declaration-doc"],
+      declarationNames: ["Widget"],
+      operations: [],
+      operationIds: [],
+      ownedOperationIds: [],
+      beforeFactIds: [],
+      afterFactIds: [],
+      changedAspects: [],
+      changeTypes: ["documentation"],
+      changeFacts: [
+        {
+          id: "fact-doc-specific",
+          sourceChangeId: "source-model",
+          hunkIds: ["hunk-doc"],
+          declarationIds: ["declaration-doc"],
+          beforeDeclarationIds: ["declaration-doc"],
+          afterDeclarationIds: ["declaration-doc"],
+          changeType: "documentation",
+          action: "modify",
+          facets: [],
+          evidenceRef: {
+            artifact: "source/source-index.json",
+            sourceChangeId: "source-model",
+            hunkIds: ["hunk-doc"],
+            declarationIds: ["declaration-doc"],
+          },
+        },
+      ],
+      groupingEvidence: { reasons: ["source:source-model"] },
+    },
+  ];
+  const sources = [
+    {
+      id: "source-client",
+      hunks: [{ id: "hunk-client" }, { id: "hunk-name" }],
+      declarations: [],
+    },
+    {
+      id: "source-model",
+      hunks: [{ id: "hunk-doc" }, { id: "hunk-version" }],
+      declarations: [
+        { id: "declaration-doc", qualifiedName: "Widget", hunkIds: ["hunk-doc"] },
+        { id: "declaration-version", qualifiedName: "Versions", hunkIds: ["hunk-version"] },
+      ],
+    },
+  ];
+
+  const result = partitionFixture(units, sources);
+
+  assert.deepEqual(result.map((unit) => unit.hunkIds), [
+    ["hunk-client", "hunk-name"],
+    ["hunk-version"],
+    ["hunk-doc"],
+  ]);
+  assert.equal(result.some((unit) => unit.id === "semantic-customization-generic"), false);
+  assert.deepEqual(
+    result.find((unit) => unit.hunkIds.includes("hunk-doc"))?.changeTypes,
+    ["documentation"],
+  );
 });
 
 void test("creates source-first semantic units and retains unchanged REST operations", (context) => {
@@ -1059,6 +1355,99 @@ void test("classifies a new API surface as add despite modified registration cod
     result.reviewUnits[0].operations.map((operation) => operation.operationId),
     ["Widgets_Create"],
   );
+});
+
+void test("keeps new-version contract changes separate from publication governance", (context) => {
+  const work = fs.mkdtempSync(path.join(process.cwd(), ".semantic-publication-purity-test-"));
+  context.onTestFinished(() => fs.rmSync(work, { recursive: true, force: true }));
+  writeJson(path.join(work, "base.json"), {
+    swagger: "2.0",
+    info: { title: "Widgets", version: "v1" },
+    paths: {},
+  });
+  writeJson(path.join(work, "current.json"), {
+    swagger: "2.0",
+    info: { title: "Widgets", version: "v2" },
+    paths: {},
+  });
+
+  const result = analyzeFixture({
+    workRoot: work,
+    manifest: {
+      projects: [
+        {
+          id: "project-widgets",
+          sourceChangeIds: ["versions-source", "main-source"],
+          artifactComparison: { mode: "new-api-version" },
+          artifacts: {
+            base: { autorest: artifact("base.json") },
+            current: { autorest: artifact("current.json") },
+          },
+        },
+      ],
+    },
+    sourceIndex: {
+      sourceChanges: [
+        {
+          id: "versions-source",
+          path: "specification/widgets/versions.tsp",
+          status: "modified",
+          hunks: [{ id: "versions-hunk", lines: ['+v2: "2026-01-01";'] }],
+          declarations: [
+            {
+              id: "versions-current",
+              kind: "enum",
+              qualifiedName: "Widgets.Versions",
+              hunkIds: ["versions-hunk"],
+              source: { revision: "current" },
+            },
+          ],
+        },
+        {
+          id: "main-source",
+          path: "specification/widgets/main.tsp",
+          status: "modified",
+          hunks: [
+            {
+              id: "main-hunk",
+              lines: ["-address?: string;", "+address: string;"],
+            },
+          ],
+          declarations: [
+            {
+              id: "widget-base",
+              kind: "model",
+              qualifiedName: "Widgets.Widget",
+              hunkIds: ["main-hunk"],
+              source: { revision: "base" },
+            },
+            {
+              id: "widget-current",
+              kind: "model",
+              qualifiedName: "Widgets.Widget",
+              hunkIds: ["main-hunk"],
+              source: { revision: "current" },
+            },
+          ],
+        },
+      ],
+    },
+  });
+
+  assert.equal(result.reviewUnits.length, 2);
+  const publication = result.reviewUnits.find((unit) =>
+    unit.declarationNames.includes("Widgets.Versions"),
+  );
+  const contract = result.reviewUnits.find((unit) =>
+    unit.declarationNames.includes("Widgets.Widget"),
+  );
+  assert.ok(publication);
+  assert.ok(contract);
+  assert.equal(publication.intentType, "api-version-publication");
+  assert.deepEqual(publication.changeTypes, ["versioning"]);
+  assert.notEqual(contract.intentType, "api-version-publication");
+  assert.deepEqual(contract.changeTypes, ["type"]);
+  assert.deepEqual(contract.hunkIds, ["main-hunk"]);
 });
 
 void test("keeps mixed added and changed operations classified as modify", (context) => {

@@ -1243,7 +1243,7 @@ function buildRootCauses(
         const method = graph.nodes.get(result.methodKey)?.value;
         const methodIdentity =
           stringField(method, "crossLanguageDefinitionId") ?? stringField(method, "identity");
-        const key = `${methodIdentity ?? result.methodKey}:${result.location ?? ""}`;
+        const key = `${graph.comparisonRole}:${methodIdentity ?? result.methodKey}:${result.location ?? ""}`;
         if (!pathsByMethod.has(key)) pathsByMethod.set(key, { graph, result, methodIdentity });
       }
     }
@@ -1253,13 +1253,17 @@ function buildRootCauses(
 
     const referenceEvidence: DownstreamRootCause["referenceEvidence"] = [];
     for (const { graph, result } of pathsByMethod.values()) {
-      const methodFactId = graph.ensureFact(result.methodKey);
-      methodFactIds.push(methodFactId);
+      for (const counterpart of projectGraphs) {
+        methodFactIds.push(counterpart.ensureFact(result.methodKey));
+      }
       for (const edge of result.path) {
         const fromFactId = graph.ensureFact(edge.from);
         const toFactId = graph.ensureFact(edge.to);
         if (edge.to.startsWith("type:") && toFactId !== undefined) {
-          typeFactIds.push(toFactId);
+          for (const counterpart of projectGraphs) {
+            const counterpartId = counterpart.ensureFact(edge.to);
+            if (counterpartId !== undefined) typeFactIds.push(counterpartId);
+          }
         }
         referenceEvidence.push({
           fromFactId,

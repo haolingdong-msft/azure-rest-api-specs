@@ -36,14 +36,19 @@ linkage, guidance applicability, and accounting; drops uncited excerpts; and
 atomically writes the existing inference, evidence, and judgment formats. It
 never fetches documents or invents provenance, evidence, or judgment.
 
-`api-version-publication` and `api-version-wide-change` intents are excluded
-from Agent coverage. The latter is identified by a `Versions` declaration, no
-directly owned operation, and only version-transition/governance mappings, not
-by an operation-count threshold. Guarded finalization adds them back as
-deterministic informational Semantic intents with their canonical affected
-operations. They do not require inference or Azure Guidelines decisions,
-create findings, or receive
-relationships from other findings.
+New runs use source-owned change facts and dimension-specific context policy.
+`api-version-publication` and `api-version-wide-change` remain legacy
+presentation/scope descriptors and do not authorize an intent-wide exclusion.
+The bounded input retains a compact version event for Azure Guidelines and
+summarizes positively verified unchanged operation pairs without serializing
+their complete contracts. Actual candidates, unresolved hunks, common/shared
+type deltas, and SDK customizations remain covered.
+
+`candidateOwnership` is authoritative for deterministic REST/downstream
+candidates. Guarded finalization carries approved candidate ownership into
+findings and rejects orphan findings under context-policy version 2. Complete
+carry-over inventories and proof remain in canonical artifacts referenced by
+the bounded input; they are not duplicated into Agent decisions.
 
 ## Azure Guidelines search evidence
 
@@ -165,10 +170,15 @@ HTML finding cards must not display `high`, `medium`, or `low` severity labels
 or severity-colored borders. Severity remains available in `assessment.json`
 for validation and machine consumers.
 
-Dimension statuses are derived, not authored:
+REST and downstream compatibility verdicts and evidence coverage are derived,
+not authored:
 
 - semantic: `assessed` or `not-assessed`;
-- REST/downstream: `passed`, `failed`, or `not-assessed`;
+- REST/downstream verdict: `passed`, `failed`, or `unknown`;
+- REST/downstream coverage: `complete`, `partial`, or `blocked`;
+- REST/downstream `status` remains the compatibility alias used by existing
+  consumers: `passed`, `failed`, or `not-assessed` when the verdict is
+  `unknown`;
 - Azure Guidelines: `passed`, `failed`, or `not-assessed`, derived from
   Semantic intent coverage and applicable fetched guidance;
 - Documentation Completeness (`documentQuality`): `passed`, `failed`,
@@ -176,7 +186,15 @@ Dimension statuses are derived, not authored:
   declaration/documented/missing coverage;
 - safety scope: `rest-and-downstream-only`, never Azure Guidelines or document quality.
 
-A blocked implemented dimension cannot pass. Documentation Completeness is
+A confirmed REST or downstream finding always produces a failed compatibility
+verdict, even when evidence coverage is partial. A blocked dimension with no
+confirmed finding has an unknown verdict. Coverage is complete with no
+blockers, partial when some candidates were assessed despite blockers, and
+blocked when blockers prevented all candidate assessment. Overall safety uses
+the REST/downstream verdicts while reporting their combined coverage
+independently.
+
+Documentation Completeness is
 `failed` when one or more eligible newly added declarations lack a nonempty effective
 compiler document, `not-assessed` when compiler evidence is incomplete,
 `not-applicable` when no eligible newly added declarations are in scope, and

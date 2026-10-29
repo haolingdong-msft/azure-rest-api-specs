@@ -8,11 +8,21 @@ the single bounded model input, required outputs, drafts, exact coverage IDs,
 and completion checklist. Read `model-input.json` exactly once unless guarded
 finalization requests the one permitted correction turn.
 
-`api-version-publication` and `api-version-wide-change` are excluded from Agent
-coverage. Guarded finalization restores them as deterministic informational
-Semantic intents with canonical affected operations and no finding
-relationships. Version-wide classification uses `Versions` declaration and
-version-transition/governance evidence, never an operation-count threshold.
+Use the supplied per-dimension `contextPolicy`. Legacy
+`api-version-publication` and `api-version-wide-change` labels do not exclude an
+entire intent. Verified unchanged operation pairs are represented by a compact
+carry-over count and evidence reference rather than per-operation review.
+Summarize the supplied version event once and complete its Azure Guidelines
+decision when requested. Judge every supplied candidate exactly once; do not
+reconstruct or omit candidates from the carry-over inventory.
+
+Coordinator grouping is frozen and may be coarse at source-file granularity.
+Do not split or merge supplied intents, including a broad `main.tsp` group.
+Summarize its actual contents without claiming one proven business feature.
+Version decorators describe feature applicability; they do not turn a feature
+into publication. Only supplied publication-eligible groups may be described
+as standalone version publications. A mixed normal group retains its version
+declaration and feature facts, with the report's explicit grouping notice.
 
 Also read only:
 
@@ -35,6 +45,10 @@ only supplied unknown hunks and write one exact compact result per request to
 `agent-workspace\agent-decisions.json`. Each is `candidates`, `no-impact`, or
 `blocked`. Inferred candidates may use only the request's source, hunk,
 operations, facts, and allowed dimensions. Never modify `model-input.json`.
+An unresolved request blocks only its supplied `allowedDimensions`, not every
+assessment dimension. A new API version does not exempt substantive REST
+candidates from judgment; explain cross-version migration incompatibilities
+without claiming an existing-version regression from head-only projections.
 
 The compact decision file must contain one concise result per supplied Semantic
 review unit and exact deterministic and inferred REST/downstream candidate

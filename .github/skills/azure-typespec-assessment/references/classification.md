@@ -12,6 +12,37 @@ The deterministic scripts identify review units, facts, and candidates. The Agen
 
 REST and downstream decisions are independent. A REST-compatible change can still break generated SDK users. Never use TCGC to classify REST compatibility or AutoRest to infer SDK surface.
 
+For a `new-api-version` comparison, assess substantive REST candidates as
+cross-version migration compatibility. Do not reject them merely because a
+version was added. Distinguish invalid old requests against the new version
+from regressions at an unchanged API-version selector. Use the supplied
+baseline/target versions and source commits; compiling both projections from
+head does not prove that previously published old-version contracts are
+unchanged. Only proven selector-only literal differences may be excluded.
+
+## Change facts and context policy
+
+Each semantic review unit is assembled from deterministic source-owned change
+facts. `changeTypes` describe what changed (`versioning`, `operation`, `type`,
+`sdk-customization`, `documentation`, or `generation-configuration`);
+`action`, declaration kind, facets, and before/after evidence remain separate.
+An intent may contain several change types. Do not reinterpret a type change as
+an operation change merely because many operations reference it.
+
+Feature semantics are primary; an attached version decorator describes
+applicability. Keep operation/model/property changes and their decorators in
+the coherent feature intent rather than absorbing them into API-version
+publication. Publication requires version-declaration-only evidence, not an
+all-`versioning` label or absence of directly owned operations. Mixed source
+hunks remain supported; physical ownership does not decide semantic category.
+
+The supplied `contextPolicy` is dimension-specific. A deterministic REST or
+neutral-SDK carry-over decision does not resolve Azure Guidelines or
+Documentation Completeness. Common/shared-type evidence may be referenced once
+while each supplied candidate still receives its own decision. Missing proof
+is not equivalence: judge the bounded candidate or preserve the supplied
+blocker/uncertainty.
+
 ## Decision rules
 
 For every candidate, compare its `actual` current behavior with its `expected` compatibility behavior and explain the caller-visible consequence.

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { deriveSafety, dimensionStatus } from "./assessment-display.ts";
+import { deriveSafety, dimensionCompatibility } from "./assessment-display.ts";
 import { sameAutorestContract } from "./autorest-contract.ts";
 import { isMain, parseArgs, readJsonObject, runMain, writeJson } from "./cli.ts";
 import { assembleCompliance } from "./compliance-assessment.ts";
@@ -358,6 +358,16 @@ function validateInferenceRequests(modelInput: Partial<AssessmentModelInput>) {
   exactCoverage(expected, actual, "inference request target");
   const unitsById = new Map(units.map((unit) => [unit.reviewUnitId, unit]));
   for (const request of requests) {
+    if (
+      !Array.isArray(request.allowedDimensions) ||
+      !request.allowedDimensions.length ||
+      new Set(request.allowedDimensions).size !== request.allowedDimensions.length ||
+      request.allowedDimensions.some(
+        (dimension) => dimension !== "rest" && dimension !== "downstream",
+      )
+    ) {
+      throw new Error(`Inference request ${request.requestId} has invalid allowed dimensions.`);
+    }
     const unit = unitsById.get(request.reviewUnitId);
     const evidenceRef = request.evidenceRef;
     if (
@@ -644,9 +654,43 @@ function findingRelations(
   restFindings: RestFinding[],
   downstreamFindings: DownstreamFinding[],
   semanticItems: SemanticItem[],
+  candidateOwnership?: {
+    rest?: Record<string, string[]>;
+    downstream?: Record<string, string[]>;
+  },
 ) {
   const semanticOperations = semanticOperationIndex(semanticItems);
+  const inheritOwnerEvidence = (finding: RestFinding | DownstreamFinding, ownerIds: string[]) => {
+    const owners = semanticItems.filter((intent) => ownerIds.includes(intent.id));
+    if (!finding.sourceChangeIds.length) {
+      finding.sourceChangeIds = [...new Set(owners.flatMap((intent) => intent.sourceChangeIds))];
+    }
+    if (!finding.hunkIds?.length) {
+      finding.hunkIds = [...new Set(owners.flatMap((intent) => intent.hunkIds ?? []))];
+    }
+    if (!finding.declarationIds?.length) {
+      finding.declarationIds = [
+        ...new Set(owners.flatMap((intent) => intent.declarationIds ?? [])),
+      ];
+    }
+    if (!finding.sources.length) {
+      finding.sources = [
+        ...new Map(
+          owners
+            .flatMap((intent) => intent.sources ?? [])
+            .map((source) => [source.id, source] as const),
+        ).values(),
+      ];
+    }
+  };
   for (const finding of restFindings) {
+    const authoritativeOwners = candidateOwnership?.rest?.[finding.id] ?? [];
+    if (authoritativeOwners.length) {
+      finding.relatedSemanticIntents = authoritativeOwners;
+      finding.semanticMatchBasis = "candidate-ownership";
+      inheritOwnerEvidence(finding, authoritativeOwners);
+      continue;
+    }
     const matches = semanticOperations.filter(({ operation }) =>
       finding.operationIds.includes(operation.operationId),
     );
@@ -656,6 +700,13 @@ function findingRelations(
       : undefined;
   }
   for (const finding of downstreamFindings) {
+    const authoritativeOwners = candidateOwnership?.downstream?.[finding.id] ?? [];
+    if (authoritativeOwners.length) {
+      finding.relatedSemanticIntents = authoritativeOwners;
+      finding.semanticMatchBasis = "candidate-ownership";
+      inheritOwnerEvidence(finding, authoritativeOwners);
+      continue;
+    }
     const declarationMatches = matchTypeFindingIntents(finding, semanticItems);
     if (declarationMatches.length) {
       finding.relatedSemanticIntents = declarationMatches.map((intent) => intent.id);
@@ -1217,38 +1268,47 @@ export function assembleAssessment({
     restFindings,
     downstreamFindings,
     semanticItems.filter((intent) => !intent.informational),
+    modelInput.candidateOwnership,
   );
   const downstreamAggregation = downstreamGroups(downstreamFindings, downstream.rootCauses, {
     ...modelInput.facts,
     ...downstream.facts,
   });
   addReciprocalRelations(semanticItems, restFindings, downstreamAggregation);
+  const rejectedRestCandidateCount = answer.restDecisions.filter(
+    (item) => item.decision === "reject",
+  ).length;
   const restDimension = {
-    status: dimensionStatus(
+    ...dimensionCompatibility(
       rest.status === "blocked" ||
+        rest.blockers.length > 0 ||
         inferenceBlockers.some((blocker) => blocker.allowedDimensions.includes("rest")),
       restFindings,
+      restFindings.length + rejectedRestCandidateCount,
     ),
     findings: restFindings,
-    rejectedCandidateCount: answer.restDecisions.filter((item) => item.decision === "reject")
-      .length,
+    rejectedCandidateCount: rejectedRestCandidateCount,
     blockers: [
       ...rest.blockers,
       ...inferenceBlockers.filter((blocker) => blocker.allowedDimensions.includes("rest")),
     ],
   };
+  const rejectedDownstreamCandidateCount = answer.downstreamDecisions.filter(
+    (item) => item.decision === "reject",
+  ).length;
   const downstreamDimension = {
-    status: dimensionStatus(
+    ...dimensionCompatibility(
       downstream.status === "blocked" ||
+        downstream.blockers.length > 0 ||
         inferenceBlockers.some((blocker) => blocker.allowedDimensions.includes("downstream")),
       downstreamFindings,
+      downstreamFindings.length + rejectedDownstreamCandidateCount,
     ),
     findings: downstreamFindings,
     methodGroups: downstreamAggregation.methodGroups,
     typeImpacts: downstreamAggregation.typeImpacts,
     rootCauses: downstream.rootCauses ?? [],
-    rejectedCandidateCount: answer.downstreamDecisions.filter((item) => item.decision === "reject")
-      .length,
+    rejectedCandidateCount: rejectedDownstreamCandidateCount,
     blockers: [
       ...downstream.blockers,
       ...inferenceBlockers.filter((blocker) => blocker.allowedDimensions.includes("downstream")),
@@ -1361,6 +1421,7 @@ export function assembleAssessment({
     projects: manifest.projects,
     blockers: [...manifest.blockers, ...answer.blockers, ...inferenceBlockers],
     provenance: {
+      contextPolicyVersion: modelInput.contextPolicyVersion ?? 1,
       modelInput: "model-input.json",
       ...(fs.existsSync(documentQualityPath) ? { documentQuality: DOCUMENT_QUALITY_ARTIFACT } : {}),
       ...(inference ? { inference: "inference.json" } : {}),
